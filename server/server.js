@@ -11,6 +11,43 @@ const { computeAndStore } = require("./features/store");
 
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
 
+// ---------------------------------------------------------------------------
+// Site key cache — avoids DB lookup on every batch
+// ---------------------------------------------------------------------------
+
+/** @type {Map<string, {projectId: string, siteId: string, allowedOrigins: string[], cachedAt: number}>} */
+const siteCache = new Map();
+const SITE_CACHE_TTL_MS = 60_000; // 60 seconds
+
+async function resolveSiteKey(siteKey) {
+  const cached = siteCache.get(siteKey);
+  if (cached && Date.now() - cached.cachedAt < SITE_CACHE_TTL_MS) {
+    return cached;
+  }
+  const { rows } = await pool.query(
+    `SELECT site_id, project_id, allowed_origins FROM sites WHERE site_key = $1`,
+    [siteKey]
+  );
+  if (!rows.length) return null;
+  const entry = {
+    projectId: rows[0].project_id,
+    siteId: rows[0].site_id,
+    allowedOrigins: rows[0].allowed_origins || [],
+    cachedAt: Date.now(),
+  };
+  siteCache.set(siteKey, entry);
+  return entry;
+}
+
+/** Invalidate cache for a specific site key */
+function invalidateSiteCache(siteKey) {
+  siteCache.delete(siteKey);
+}
+
+/** Default project/site for requests without siteKey */
+const DEFAULT_PROJECT_ID = "default";
+const DEFAULT_SITE_ID = "default";
+
 fastify.register(require("@fastify/cors"), {
   origin: CORS_ORIGIN.split(",").map((o) => o.trim()),
 });
@@ -28,7 +65,14 @@ fastify.register(require("@fastify/static"), {
 fastify.register(require("@fastify/static"), {
   root: path.join(__dirname, "..", "dashboard"),
   prefix: "/dashboard/",
-  decorateReply: false, // second static plugin needs this
+  decorateReply: false,
+});
+
+// Serve operator cabinet under /cabinet
+fastify.register(require("@fastify/static"), {
+  root: path.join(__dirname, "..", "cabinet"),
+  prefix: "/cabinet/",
+  decorateReply: false,
 });
 
 // ---------------------------------------------------------------------------
@@ -226,6 +270,7 @@ const ingestBodySchema = {
   additionalProperties: false,
   properties: {
     sessionId: { type: "string", minLength: 1 },
+    siteKey: { type: "string", minLength: 1 },
     sentAt: { type: "integer" },
     events: {
       type: "array",
@@ -243,18 +288,48 @@ fastify.post(
   "/api/events",
   { schema: { body: ingestBodySchema } },
   async (request, reply) => {
-    const { sessionId, sentAt, events } = request.body;
-    fastify.log.info({ sessionId, eventCount: events.length }, "batch received");
+    const { sessionId, siteKey, sentAt, events } = request.body;
+
+    // Resolve project/site from siteKey (or use defaults)
+    let projectId = DEFAULT_PROJECT_ID;
+    let siteId = DEFAULT_SITE_ID;
+
+    if (siteKey) {
+      const site = await resolveSiteKey(siteKey);
+      if (!site) {
+        return reply.code(403).send({ error: "unknown site key" });
+      }
+      projectId = site.projectId;
+      siteId = site.siteId;
+
+      // Origin validation (skip if allowed_origins is empty)
+      if (site.allowedOrigins.length > 0) {
+        const origin = request.headers.origin || request.headers.referer || "";
+        const originMatch = site.allowedOrigins.some((ao) => origin.startsWith(ao));
+        if (!originMatch) {
+          fastify.log.warn({ siteKey, origin }, "origin mismatch");
+          return reply.code(403).send({ error: "origin not allowed" });
+        }
+      }
+
+      // Update last_event_at (fire-and-forget)
+      pool.query(
+        "UPDATE sites SET last_event_at = NOW(), install_status = 'verified' WHERE site_id = $1",
+        [siteId]
+      ).catch(() => {});
+    }
+
+    fastify.log.info({ sessionId, projectId, siteId, eventCount: events.length }, "batch received");
 
     // Respond immediately — DB write must not block the client
     reply.send({ ok: true });
 
     // Fire-and-forget persistence + SSE broadcast + feature recomputation
-    persistBatch(sessionId, sentAt, events)
+    persistBatch(sessionId, sentAt, events, projectId, siteId)
       .then(() => {
-        broadcastSSE({ sessionId, sentAt, events });
+        broadcastSSE({ sessionId, sentAt, events, projectId });
         // Recompute features after new data is persisted
-        return computeAndStore(sessionId);
+        return computeAndStore(sessionId, projectId, siteId);
       })
       .then(() => {
         fastify.log.debug({ sessionId }, "features recomputed");
@@ -320,16 +395,26 @@ fastify.get("/api/events/live", (request, reply) => {
 fastify.get("/api/sessions", async (request) => {
   const limit = Math.min(parseInt(request.query.limit, 10) || 50, 200);
   const offset = Math.max(parseInt(request.query.offset, 10) || 0, 0);
+  const projectId = request.query.project_id;
+
+  let whereClause = "";
+  const params = [limit, offset];
+
+  if (projectId) {
+    whereClause = "WHERE s.project_id = $3";
+    params.push(projectId);
+  }
 
   const { rows } = await pool.query(
-    `SELECT s.session_id, s.first_seen_at, s.last_seen_at,
+    `SELECT s.session_id, s.first_seen_at, s.last_seen_at, s.project_id, s.site_id,
             COUNT(e.id)::int AS event_count
      FROM sessions s
      LEFT JOIN events e ON e.session_id = s.session_id
+     ${whereClause}
      GROUP BY s.id
      ORDER BY s.last_seen_at DESC
      LIMIT $1 OFFSET $2`,
-    [limit, offset]
+    params
   );
 
   return { sessions: rows };
@@ -376,6 +461,205 @@ fastify.get("/api/sessions/:sessionId", async (request, reply) => {
 });
 
 // ---------------------------------------------------------------------------
+// Project & Site Management API
+// ---------------------------------------------------------------------------
+
+const projectBodySchema = {
+  type: "object",
+  required: ["name", "vertical"],
+  properties: {
+    name: { type: "string", minLength: 1, maxLength: 255 },
+    vertical: { type: "string", enum: ["ecommerce", "services", "leadgen", "education", "b2b", "other"] },
+    status: { type: "string", enum: ["setup", "active", "paused", "archived"] },
+  },
+};
+
+// POST /api/projects — create project
+fastify.post("/api/projects", { schema: { body: projectBodySchema } }, async (request, reply) => {
+  const { name, vertical } = request.body;
+
+  const { rows } = await pool.query(
+    `INSERT INTO projects (name, vertical) VALUES ($1, $2) RETURNING *`,
+    [name, vertical]
+  );
+
+  return reply.code(201).send({ project: rows[0] });
+});
+
+// GET /api/projects — list projects with stats
+fastify.get("/api/projects", async () => {
+  const { rows } = await pool.query(`
+    SELECT p.*,
+      (SELECT COUNT(*) FROM sites si WHERE si.project_id = p.project_id) AS sites_count,
+      (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.project_id
+        AND s.last_seen_at > NOW() - INTERVAL '24 hours') AS sessions_24h,
+      (SELECT COUNT(*) FROM conversions c WHERE c.project_id = p.project_id
+        AND c.created_at > NOW() - INTERVAL '24 hours') AS conversions_24h
+    FROM projects p
+    WHERE p.status != 'archived'
+    ORDER BY p.created_at DESC
+  `);
+
+  return { projects: rows };
+});
+
+// GET /api/projects/:projectId — project detail
+fastify.get("/api/projects/:projectId", async (request, reply) => {
+  const { projectId } = request.params;
+
+  const { rows } = await pool.query(
+    "SELECT * FROM projects WHERE project_id = $1", [projectId]
+  );
+  if (!rows.length) return reply.code(404).send({ error: "project not found" });
+
+  return { project: rows[0] };
+});
+
+// PUT /api/projects/:projectId — update project
+fastify.put("/api/projects/:projectId", async (request, reply) => {
+  const { projectId } = request.params;
+  const { name, vertical, status } = request.body;
+
+  const sets = [];
+  const values = [projectId];
+  let idx = 2;
+
+  if (name !== undefined) { sets.push(`name = $${idx}`); values.push(name); idx++; }
+  if (vertical !== undefined) { sets.push(`vertical = $${idx}`); values.push(vertical); idx++; }
+  if (status !== undefined) { sets.push(`status = $${idx}`); values.push(status); idx++; }
+
+  if (sets.length === 0) return reply.code(400).send({ error: "no fields to update" });
+  sets.push("updated_at = NOW()");
+
+  const { rows } = await pool.query(
+    `UPDATE projects SET ${sets.join(", ")} WHERE project_id = $1 RETURNING *`,
+    values
+  );
+  if (!rows.length) return reply.code(404).send({ error: "project not found" });
+  return { project: rows[0] };
+});
+
+// POST /api/projects/:projectId/sites — add site to project
+const siteBodySchema = {
+  type: "object",
+  required: ["domain"],
+  properties: {
+    domain: { type: "string", minLength: 1, maxLength: 255 },
+    allowed_origins: { type: "array", items: { type: "string" } },
+    install_method: { type: "string", enum: ["gtm", "direct_script", "server_only"] },
+  },
+};
+
+fastify.post(
+  "/api/projects/:projectId/sites",
+  { schema: { body: siteBodySchema } },
+  async (request, reply) => {
+    const { projectId } = request.params;
+    const { domain, allowed_origins, install_method } = request.body;
+
+    // Verify project exists
+    const projRes = await pool.query(
+      "SELECT project_id FROM projects WHERE project_id = $1", [projectId]
+    );
+    if (!projRes.rows.length) {
+      return reply.code(404).send({ error: "project not found" });
+    }
+
+    const origins = allowed_origins || [];
+
+    const { rows } = await pool.query(
+      `INSERT INTO sites (project_id, domain, allowed_origins, install_method)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [projectId, domain, origins, install_method || "gtm"]
+    );
+
+    return reply.code(201).send({ site: rows[0] });
+  }
+);
+
+// GET /api/projects/:projectId/sites — list sites for project
+fastify.get("/api/projects/:projectId/sites", async (request) => {
+  const { projectId } = request.params;
+
+  const { rows } = await pool.query(
+    "SELECT * FROM sites WHERE project_id = $1 ORDER BY created_at DESC",
+    [projectId]
+  );
+
+  return { sites: rows };
+});
+
+// GET /api/sites/:siteId/verify — check if events received in last 5 min
+fastify.get("/api/sites/:siteId/verify", async (request, reply) => {
+  const { siteId } = request.params;
+
+  const { rows } = await pool.query(
+    "SELECT site_id, install_status, last_event_at FROM sites WHERE site_id = $1",
+    [siteId]
+  );
+  if (!rows.length) return reply.code(404).send({ error: "site not found" });
+
+  const site = rows[0];
+  const recentThreshold = new Date(Date.now() - 5 * 60 * 1000);
+  const hasRecentEvents = site.last_event_at && new Date(site.last_event_at) > recentThreshold;
+
+  return {
+    siteId: site.site_id,
+    status: hasRecentEvents ? "verified" : site.last_event_at ? "stale" : "pending",
+    lastEventAt: site.last_event_at,
+  };
+});
+
+// GET /api/sites/:siteId/snippet — return install snippet
+fastify.get("/api/sites/:siteId/snippet", async (request, reply) => {
+  const { siteId } = request.params;
+
+  const { rows } = await pool.query(
+    "SELECT site_key, domain, install_method FROM sites WHERE site_id = $1",
+    [siteId]
+  );
+  if (!rows.length) return reply.code(404).send({ error: "site not found" });
+
+  const { site_key, domain, install_method } = rows[0];
+  const apiBase = process.env.API_BASE_URL || `http://localhost:${PORT}`;
+
+  const directScript = `<script src="${apiBase}/dist/tracker.js"><\/script>
+<script>
+  const tracker = new SurfaiTracker({
+    endpoint: "${apiBase}/api/events",
+    siteKey: "${site_key}"
+  });
+  tracker.start();
+<\/script>`;
+
+  const gtmScript = `<!-- SURFAI Tracker — ${domain} -->
+<script>
+  (function() {
+    var s = document.createElement('script');
+    s.src = '${apiBase}/dist/tracker.js';
+    s.onload = function() {
+      var tracker = new SurfaiTracker({
+        endpoint: '${apiBase}/api/events',
+        siteKey: '${site_key}'
+      });
+      tracker.start();
+    };
+    document.head.appendChild(s);
+  })();
+<\/script>`;
+
+  return {
+    siteKey: site_key,
+    domain,
+    installMethod: install_method,
+    snippets: {
+      direct: directScript,
+      gtm: gtmScript,
+    },
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Goal Configuration CRUD API
 // ---------------------------------------------------------------------------
 
@@ -388,32 +672,40 @@ const goalBodySchema = {
     rules: { type: "object" },
     is_primary: { type: "boolean" },
     attribution_window_ms: { type: "integer", minimum: 0 },
+    project_id: { type: "string" },
   },
 };
 
 // POST /api/goals — create goal
 fastify.post("/api/goals", { schema: { body: goalBodySchema } }, async (request, reply) => {
-  const { name, type, rules, is_primary, attribution_window_ms } = request.body;
+  const { name, type, rules, is_primary, attribution_window_ms, project_id } = request.body;
   const tenantId = request.headers["x-tenant-id"] || "default";
+  const projectId = project_id || DEFAULT_PROJECT_ID;
 
   const { rows } = await pool.query(
-    `INSERT INTO goals (tenant_id, name, type, rules, is_primary, attribution_window_ms)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [tenantId, name, type, JSON.stringify(rules || {}), is_primary || false, attribution_window_ms || 1800000]
+    `INSERT INTO goals (tenant_id, name, type, rules, is_primary, attribution_window_ms, project_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [tenantId, name, type, JSON.stringify(rules || {}), is_primary || false, attribution_window_ms || 1800000, projectId]
   );
 
   return reply.code(201).send({ goal: rows[0] });
 });
 
-// GET /api/goals — list goals
+// GET /api/goals — list goals (filterable by project_id or tenant_id)
 fastify.get("/api/goals", async (request) => {
+  const projectId = request.query.project_id;
   const tenantId = request.headers["x-tenant-id"] || "default";
 
-  const { rows } = await pool.query(
-    "SELECT * FROM goals WHERE tenant_id = $1 AND NOT is_deleted ORDER BY created_at DESC",
-    [tenantId]
-  );
+  let query, params;
+  if (projectId) {
+    query = "SELECT * FROM goals WHERE project_id = $1 AND NOT is_deleted ORDER BY created_at DESC";
+    params = [projectId];
+  } else {
+    query = "SELECT * FROM goals WHERE tenant_id = $1 AND NOT is_deleted ORDER BY created_at DESC";
+    params = [tenantId];
+  }
 
+  const { rows } = await pool.query(query, params);
   return { goals: rows };
 });
 
@@ -575,37 +867,37 @@ fastify.get("/api/sessions/:sessionId/features", async (request, reply) => {
 // Persistence (non-blocking, after HTTP reply)
 // ---------------------------------------------------------------------------
 
-async function persistBatch(sessionId, sentAt, events) {
+async function persistBatch(sessionId, sentAt, events, projectId, siteId) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
     // Upsert session
     await client.query(
-      `INSERT INTO sessions (session_id) VALUES ($1)
+      `INSERT INTO sessions (session_id, project_id, site_id) VALUES ($1, $2, $3)
        ON CONFLICT (session_id) DO UPDATE SET last_seen_at = NOW()`,
-      [sessionId]
+      [sessionId, projectId, siteId]
     );
 
     // Insert raw batch
     const { rows } = await client.query(
-      `INSERT INTO raw_batches (session_id, sent_at, event_count, payload)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
-      [sessionId, sentAt, events.length, JSON.stringify({ events })]
+      `INSERT INTO raw_batches (session_id, sent_at, event_count, payload, project_id, site_id)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [sessionId, sentAt, events.length, JSON.stringify({ events }), projectId, siteId]
     );
     const batchId = rows[0].id;
 
     // Insert individual events + handle goal conversions
     for (const event of events) {
       await client.query(
-        `INSERT INTO events (session_id, type, data, ts, batch_id)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [sessionId, event.type, JSON.stringify(event.data), event.data.ts, batchId]
+        `INSERT INTO events (session_id, type, data, ts, batch_id, project_id, site_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [sessionId, event.type, JSON.stringify(event.data), event.data.ts, batchId, projectId, siteId]
       );
 
       // Goal events → insert into conversions (with dedup check)
       if (event.type === "goal") {
-        await persistGoalConversion(client, sessionId, event.data);
+        await persistGoalConversion(client, sessionId, event.data, projectId);
       }
     }
 
@@ -622,7 +914,7 @@ async function persistBatch(sessionId, sentAt, events) {
  * Persist a goal conversion event into the conversions table.
  * Deduplicates: same goal_id + session_id within 5s window.
  */
-async function persistGoalConversion(client, sessionId, goalData) {
+async function persistGoalConversion(client, sessionId, goalData, projectId) {
   const { goalId, value, metadata, ts } = goalData;
 
   // Check if goal exists (auto-create js_sdk goals on first hit)
@@ -634,9 +926,9 @@ async function persistGoalConversion(client, sessionId, goalData) {
   if (goalRes.rows.length === 0) {
     // Auto-register as js_sdk goal
     await client.query(
-      `INSERT INTO goals (goal_id, name, type) VALUES ($1, $2, 'js_sdk')
+      `INSERT INTO goals (goal_id, name, type, project_id) VALUES ($1, $2, 'js_sdk', $3)
        ON CONFLICT (goal_id) DO NOTHING`,
-      [goalId, goalId]
+      [goalId, goalId, projectId]
     );
     resolvedGoalId = goalId;
   }
@@ -652,9 +944,9 @@ async function persistGoalConversion(client, sessionId, goalData) {
 
   // Insert conversion
   await client.query(
-    `INSERT INTO conversions (session_id, goal_id, source, value, metadata, ts)
-     VALUES ($1, $2, 'js_sdk', $3, $4, $5)`,
-    [sessionId, resolvedGoalId, value || null, JSON.stringify(metadata || {}), ts]
+    `INSERT INTO conversions (session_id, goal_id, source, value, metadata, ts, project_id)
+     VALUES ($1, $2, 'js_sdk', $3, $4, $5, $6)`,
+    [sessionId, resolvedGoalId, value || null, JSON.stringify(metadata || {}), ts, projectId]
   );
 
   // Update session_features converted flag

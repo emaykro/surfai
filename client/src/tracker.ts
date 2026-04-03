@@ -24,6 +24,7 @@ export class SurfaiTracker {
   private mouseSampleRate: number;
   private idleThreshold: number;
   private endpoint: string;
+  private siteKey: string | undefined;
 
   private lastMouseSend = 0;
   private lastActivity = now();
@@ -66,6 +67,7 @@ export class SurfaiTracker {
 
   constructor(opts: TrackerOptions) {
     this.endpoint = opts.endpoint;
+    this.siteKey = opts.siteKey;
     this.flushInterval = opts.flushInterval ?? 5_000;
     this.mouseSampleRate = opts.mouseSampleRate ?? 150;
     this.idleThreshold = opts.idleThreshold ?? 10_000;
@@ -378,11 +380,15 @@ export class SurfaiTracker {
   }
 
   private buildPayload(events: TrackingEvent[]): string {
-    return JSON.stringify({
+    const payload: Record<string, unknown> = {
       sessionId: getSessionId(),
-      events,
       sentAt: now(),
-    });
+      events,
+    };
+    if (this.siteKey) {
+      payload.siteKey = this.siteKey;
+    }
+    return JSON.stringify(payload);
   }
 
   private async sendWithRetry(body: string): Promise<void> {

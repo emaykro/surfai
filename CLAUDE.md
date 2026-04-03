@@ -21,6 +21,10 @@ server/            Node.js ingest server
     backfill.js        Backfill script for existing sessions
 dashboard/         Analytics dashboard (vanilla JS, zero deps)
   index.html         Main dashboard page — session list, live feed, replay
+cabinet/           Operator cabinet (vanilla JS, zero deps)
+  index.html         SPA shell — project list, site setup, snippet copy
+  js/app.js          Hash router, API calls, views
+  css/style.css      Dark theme styling
 ml/                Python CatBoost training pipeline
   config.py          Feature lists, CatBoost params, DB config
   cli.py             CLI: train | evaluate | generate-synthetic
@@ -78,6 +82,7 @@ Every `POST /api/events` body must be:
 ```json
 {
   "sessionId": "<uuid>",
+  "siteKey": "<optional, hex string from sites table>",
   "sentAt": 1710000000000,
   "events": [
     { "type": "mouse",  "data": { "x": 120, "y": 480, "ts": 1710000000000 } },
@@ -102,22 +107,31 @@ Every `POST /api/events` body must be:
 | `cross_session` | `visitorId`, `visitNumber`, `returnWithin24h`, `returnWithin7d`, `ts` | Cross-session tracking |
 | `goal` | `goalId`, `value?`, `metadata?`, `ts` | Conversion goal event |
 
-### Dashboard API
+### Dashboard & Management API
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/sessions?limit=50&offset=0` | List sessions (ordered by last_seen_at DESC) |
+| `GET` | `/api/sessions?limit=50&offset=0&project_id=X` | List sessions (filterable by project) |
 | `GET` | `/api/sessions/:sessionId?type=mouse` | Session detail with events (optional type filter, max 5000) |
 | `GET` | `/api/events/live` | SSE stream — broadcasts batches as they arrive |
 | `GET` | `/api/sessions/:sessionId/features` | Computed ML feature vector for a session |
 | `GET` | `/api/sessions/:sessionId/conversions` | Conversion events for a session |
-| `POST` | `/api/goals` | Create a goal (name, type, rules) |
-| `GET` | `/api/goals` | List goals for tenant |
+| `POST` | `/api/projects` | Create project (name, vertical) |
+| `GET` | `/api/projects` | List projects with 24h stats |
+| `GET` | `/api/projects/:projectId` | Project detail |
+| `PUT` | `/api/projects/:projectId` | Update project |
+| `POST` | `/api/projects/:projectId/sites` | Add site (domain, origins, install method) → generates siteKey |
+| `GET` | `/api/projects/:projectId/sites` | List sites for project |
+| `GET` | `/api/sites/:siteId/verify` | Check install status (events in last 5 min) |
+| `GET` | `/api/sites/:siteId/snippet` | Get install snippets (direct + GTM) |
+| `POST` | `/api/goals` | Create a goal (name, type, rules, project_id) |
+| `GET` | `/api/goals?project_id=X` | List goals (filterable by project) |
 | `PUT` | `/api/goals/:goalId` | Update goal |
 | `DELETE` | `/api/goals/:goalId` | Soft-delete goal |
 | `POST` | `/api/conversions` | Server-side conversion registration |
 
 Dashboard UI: `http://localhost:3000/dashboard/`
+Operator Cabinet: `http://localhost:3000/cabinet/`
 
 ### Rules
 
@@ -131,14 +145,18 @@ Dashboard UI: `http://localhost:3000/dashboard/`
 
 ## Current Strategy
 
-**Active Phase:** Phase 6 — CatBoost Training Pipeline (in progress).
-Phases 1–5 are complete.
+**Active Phase:** Phase 6 — Multi-Project Data Model & Operator Cabinet.
+Phases 1–5 complete. CatBoost training pipeline (`ml/`) built and smoke-tested.
+
+**Operating model:** Operator-managed platform. Internal team connects tracker to client sites via GTM, manages projects through operator cabinet. No client-facing self-serve yet.
 
 **Focus:**
-- Python CatBoost training pipeline (`ml/`) — training on `session_features` with `converted` label
-- Train on real data after deploying SDK to production sites
-- Synthetic data only for pipeline smoke tests
-- Strategy: clean pipeline → baseline on real data → identify bottleneck (data volume / feature quality / label quality)
+- Multi-project isolation: `projects`, `sites`, `siteKey` auth
+- Extend existing tables with `project_id` / `site_id`
+- Operator cabinet: project CRUD, site onboarding, GTM snippet generator
+- SDK: `siteKey` in every batch, server-side origin validation
+
+**Revised phase order:** 6=Multi-Project → 7=Hierarchical ML → 8=Predictive Export to GA4/Metrika → 9=Hardening → 10=Public SaaS
 
 **Master Roadmap:** `vault/decisions/2026-04-02_long_term_development_roadmap.md`
 

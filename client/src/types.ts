@@ -127,6 +127,8 @@ export interface DataLayerMapping {
 export interface TrackerOptions {
   /** Backend endpoint to send batches to */
   endpoint: string;
+  /** Site key for multi-project isolation (provided by operator cabinet) */
+  siteKey?: string;
   /** How often to flush the buffer (ms). Default: 5 000 */
   flushInterval?: number;
   /** Mouse-move throttle (ms). Default: 150 */

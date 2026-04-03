@@ -8,9 +8,11 @@ const { extractAllFeatures } = require("./extractors");
  * and upsert into session_features.
  *
  * @param {string} sessionId
+ * @param {string} [projectId]
+ * @param {string} [siteId]
  * @returns {object} computed features
  */
-async function computeAndStore(sessionId) {
+async function computeAndStore(sessionId, projectId, siteId) {
   // Fetch all events for the session, ordered by timestamp
   const { rows: events } = await pool.query(
     `SELECT type, data, ts FROM events
@@ -62,6 +64,22 @@ async function computeAndStore(sessionId) {
     values.push(val !== undefined ? val : null);
     placeholders.push(`$${idx}`);
     updates.push(`${col} = $${idx}`);
+    idx++;
+  }
+
+  // Project/site isolation
+  if (projectId) {
+    columns.push("project_id");
+    values.push(projectId);
+    placeholders.push(`$${idx}`);
+    updates.push(`project_id = $${idx}`);
+    idx++;
+  }
+  if (siteId) {
+    columns.push("site_id");
+    values.push(siteId);
+    placeholders.push(`$${idx}`);
+    updates.push(`site_id = $${idx}`);
     idx++;
   }
 

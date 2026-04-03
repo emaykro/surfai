@@ -1,6 +1,10 @@
 # SURFAI — Long-Term Development Roadmap
 
-Master Reference Document. Created 2026-04-02.
+Master Reference Document. Created 2026-04-02. Updated 2026-04-03.
+
+**Operating model**: Operator-managed predictive analytics platform. Internal team manages all projects. No client self-serve yet.
+
+**Product flow**: Install tracker on client sites via GTM → collect behavioral data + real conversions → train hierarchical ML models → export predictive synthetic conversions back to GA4/Metrika → ad platforms optimize on expanded signal → CPA drops 20-30%.
 
 ---
 
@@ -136,103 +140,179 @@ Master Reference Document. Created 2026-04-02.
 - [x] Summary cards: conversion rate, total conversions in header
 - [x] Filter sessions by: all / converted / not converted
 
-### 5.8 GTM Custom Tag Template (stretch — deferred)
-- [ ] Community Template Gallery-ready GTM tag template
-- [ ] Config fields: API endpoint, site ID, behavioral tracking on/off, goal mappings
-
 **Dependencies:** Phase 4.
 
-**Why before ML:** The prediction engine (Phase 6) needs labeled data. Without explicit conversion signals, the model has no ground truth to learn from. This phase produces the `y` variable for supervised learning.
-
-**Status:** All core items implemented. GTM tag template deferred to Phase 8 (SaaS).
+**Status:** All core items implemented.
 
 ---
 
-## Phase 6: CatBoost + DNN Prediction Engine
+## Phase 6: Multi-Project Data Model & Operator Cabinet
 
-**Goal:** Real-time visitor intent prediction (conversion, bounce, fraud).
+**Goal:** Introduce project/site isolation so we can connect tracker to multiple client sites, store data separately per project, and manage everything from one internal operator console.
 
-**Deliverables:**
-- [ ] Training data pipeline: labeled sessions → feature vectors (uses Phase 5 conversion labels)
-- [ ] CatBoost model for tabular features (engagement, session, context)
-- [ ] DNN model for sequential features (mouse/scroll time series)
-- [ ] Ensemble: CatBoost + DNN weighted combination
-- [ ] Model serving API (Python FastAPI or ONNX in Node.js)
-- [ ] Prediction endpoint: `POST /api/predict` → intent scores
-- [ ] A/B framework: shadow mode for model comparison
-- [ ] Model versioning and rollback mechanism
+**Why now:** Without project isolation, all sessions from all client sites land in one global bucket. We cannot train per-project models, cannot filter dashboard by client, and cannot generate unique tracking snippets.
 
-**Dependencies:** Phase 4, Phase 5.
+### 6.1 Data Model — New Tables
+- [x] `projects` table: project_id, name, vertical (ecommerce / services / leadgen / education / b2b / other), status (setup / active / paused / archived), created_at
+- [x] `sites` table: site_id, project_id FK, domain, site_key (unique tracking token), allowed_origins[], install_method (gtm / direct_script / server_only), install_status (pending / verified / error), last_event_at, created_at
+- [ ] `tracker_installations` table: site_id FK, method, gtm_container_id, verified_at, last_health_check, status (deferred — not needed for MVP)
+
+### 6.2 Data Model — Extend Existing Tables
+- [x] Add project_id and site_id to sessions, raw_batches, events, session_features
+- [x] Add project_id to goals and conversions
+- [x] Migration: backfill existing data into a "default" project + "localhost" site
+- [x] Indexes on project_id and site_id for all major tables
+
+### 6.3 SDK — Site Identity
+- [x] New TrackerOptions.siteKey field (public key identifying the site)
+- [x] SDK sends siteKey in every batch payload alongside sessionId
+- [x] Server resolves siteKey → project_id + site_id, rejects unknown keys (403)
+- [x] Server validates Origin/Referer against sites.allowed_origins
+- [x] In-memory site cache (60s TTL) to avoid DB hit per batch
+- [x] project_id/site_id stored on sessions, events, raw_batches, session_features, goals, conversions
+- [x] GET /api/sessions, GET /api/goals support ?project_id= filter
+- [ ] Rate limiting per site_id (deferred)
+
+### 6.4 GTM Integration
+- [x] GTM Custom HTML tag template: copy-paste snippet with siteKey pre-filled (via GET /api/sites/:siteId/snippet)
+- [x] Install verification endpoint: GET /api/sites/:siteId/verify — checks last_event_at recency
+- [ ] Debug mode: SDK sends ping event on init, server confirms receipt (deferred)
+
+### 6.5 Operator Cabinet — Project Management
+- [ ] Internal auth (simple password via ENV — deferred to deployment)
+- [x] Projects list: name, vertical, sites count, sessions/24h, conversions/24h, status
+- [x] Create project: name, vertical
+- [x] Project detail: sites tab, goals tab, status toggle
+- [x] Add site: domain, allowed origins, install method → generates siteKey + snippet
+- [x] Site detail: siteKey, install snippet (GTM + direct), copy to clipboard, verify
+- [ ] Goal management per project: create/edit goals from cabinet (deferred)
+
+### 6.6 Operator Cabinet — Data Quality & Health
+- [x] Per-site: install status (pending/verified/stale), last event timestamp
+- [x] Install verification: check if events received in last 5 min
+- [ ] Missing data alerts (deferred)
+- [ ] Traffic anomaly flags (deferred)
+
+### 6.7 Ingest Pipeline Changes
+- [x] POST /api/events validates siteKey, injects project_id/site_id
+- [x] GET /api/sessions, GET /api/goals gain ?project_id= filter
+- [x] SSE broadcast includes projectId
+- [x] Feature recomputation stores project_id/site_id on session_features
+
+**Dependencies:** Phase 5.
 
 ---
 
-## Phase 7: Real-Time Scoring & Triggers
+## Phase 7: Hierarchical ML Pipeline
 
-**Goal:** Score visitors in real-time and trigger actions.
+**Goal:** Train models that predict conversion probability. Three-tier hierarchy: global baseline → vertical-specific → project-specific. New projects get predictions immediately via global/vertical; project models activate after enough labeled data.
 
-**Deliverables:**
-- [ ] Streaming score computation (on each batch arrival)
-- [ ] Webhook system: fire on score threshold crossings
-- [ ] JavaScript callback API: SDK can receive score updates
-- [ ] Integration hooks: Slack, email, CRM push
-- [ ] Score decay: reduce confidence when user goes idle
-- [ ] Dashboard: real-time score overlay per active session
-- [ ] Alert rules configuration (UI or config file)
+### 7.1 Training Data Pipeline
+- [ ] Data loader filters: all, by_vertical, by_project
+- [ ] Temporal train/val/test split (never random — always by time)
+- [ ] Cross-project validation: hold out entire project to test generalization
+- [ ] Feature augmentation: add vertical, site_category as categorical features for global model
+- [ ] Minimum data thresholds: global (500 sessions / 50 conversions), vertical (200/20), project (100/10)
+
+### 7.2 Model Hierarchy
+- [ ] Global baseline: trained on all projects, vertical as feature
+- [ ] Vertical models: per-vertical training (ecommerce, services, leadgen, etc.)
+- [ ] Project-specific: fine-tuned on single project data when threshold met
+- [ ] CatBoost for all tiers
+- [ ] DNN for sequential features (future: after CatBoost baseline works)
+
+### 7.3 Model Registry
+- [ ] model_versions table: model_id, scope (global/vertical/project), scope_id, version, metrics JSONB, artifact_path, status, trained_at
+- [ ] model_assignments table: project_id, active_model_id, fallback_model_id, serving_policy
+- [ ] CLI: train --scope global, train --scope vertical --vertical ecommerce, train --scope project --project-id X
+
+### 7.4 Serving Policy
+- [ ] New project (< threshold): global + vertical model
+- [ ] Growing project (threshold met): project model primary, global/vertical fallback
+- [ ] Automatic promotion when project model outperforms global on holdout
+
+### 7.5 Quality & Monitoring
+- [ ] Per-model metrics: AUC-ROC, precision@k, contrast ratio
+- [ ] Calibration: predicted probability vs actual conversion rate
+- [ ] Drift detection, weekly retraining schedule
+- [ ] Shadow mode for new model versions
+
+### 7.6 Operator Cabinet — Model Management
+- [ ] Model dashboard: global, vertical, project models with metrics
+- [ ] Per-project: active model, accuracy trend, serving policy
+- [ ] Manual controls: trigger retrain, promote/rollback, change policy
 
 **Dependencies:** Phase 6.
 
 ---
 
-## Phase 8: Multi-Tenant SaaS Architecture
+## Phase 8: Predictive Scoring & Analytics Export
 
-**Goal:** Serve multiple customers with isolated data.
+**Goal:** Score sessions in real-time, export predictive conversions to GA4/Metrika so ad platforms optimize on expanded signal.
 
-**Deliverables:**
-- [ ] Tenant management: API keys, site registration
-- [ ] Data isolation: schema-per-tenant or row-level security
-- [ ] SDK initialization with API key (`new SurfaiTracker({ apiKey, ... })`)
-- [ ] Rate limiting per tenant
-- [ ] Usage metering and billing hooks
-- [ ] Admin dashboard: tenant management, usage stats
-- [ ] Onboarding flow: snippet generator, setup wizard
+### 8.1 Real-Time Scoring
+- [ ] Score computation on each batch arrival
+- [ ] session_predictions table: session_id, project_id, model_id, score (0..1), confidence, score_bucket, computed_at
+- [ ] Score decay on idle, refresh on activity
+- [ ] Prediction API: GET /api/sessions/:sessionId/prediction
 
-**Dependencies:** Phase 3, Phase 7.
+### 8.2 Predictive Conversion Logic
+- [ ] Per-project thresholds: high (0.8), medium (0.5)
+- [ ] Value = goal_price × probability × parity_coefficient
+- [ ] Parity balancing: predicted total value ≈ real total value
+- [ ] Bot filtering, dedup (max 1 prediction export per session)
+
+### 8.3 GA4 Export (Measurement Protocol v2)
+- [ ] prediction_exports table: session_id, project_id, platform, event_name, value, status, sent_at
+- [ ] Per-project GA4 config: measurement_id, api_secret
+- [ ] Separate events: surfai_predicted_lead, surfai_predicted_purchase (never mixed with real)
+- [ ] Include model_version, score_bucket in event params
+
+### 8.4 Yandex.Metrika Export
+- [ ] Metrika offline conversions API
+- [ ] Per-project config: counter_id, goal_name
+- [ ] Distinct predicted goals (never mixed with real)
+
+### 8.5 Export Pipeline
+- [ ] Background worker: poll predictions, batch exports
+- [ ] Retry with backoff, respect API quotas
+- [ ] Export status dashboard per project
+
+**Dependencies:** Phase 7.
 
 ---
 
 ## Phase 9: Production Hardening & Scale
 
-**Goal:** Production-grade reliability and performance.
+**Goal:** Production-grade reliability for multiple client sites.
 
-**Deliverables:**
-- [ ] Event ingestion via message queue (Redis Streams or Kafka)
-- [ ] Horizontal scaling: stateless ingest workers behind load balancer
-- [ ] PostgreSQL partitioning: time-based partitions on events table
-- [ ] Data retention policies: auto-archive/delete old events
-- [ ] Health checks, readiness probes, Prometheus metrics
-- [ ] Structured error tracking (Sentry or equivalent)
-- [ ] CI/CD pipeline: lint, test, build, deploy
-- [ ] Load testing: target 10K events/sec per node
-- [ ] Backup and disaster recovery plan
+- [ ] Redis Streams for ingest → processing decoupling
+- [ ] Horizontal scaling: stateless ingest workers
+- [ ] PostgreSQL partitioning (time-based on events/raw_batches)
+- [ ] Data retention policies per project
+- [ ] Health checks, Prometheus metrics, Sentry
+- [ ] CI/CD: GitHub Actions lint → test → build → deploy
+- [ ] Zero-downtime deploys
+- [ ] Backup and disaster recovery
 
 **Dependencies:** Phase 8.
 
 ---
 
-## Phase 10: Advanced Analytics & Public API
+## Phase 10: Public SaaS Layer (Future)
 
-**Goal:** Deep insights and third-party integrations.
+**Goal:** Open platform for self-serve when proven with managed clients.
 
-**Deliverables:**
-- [ ] Cohort analysis: group visitors by behavior patterns
-- [ ] Funnel analysis: conversion path visualization
-- [ ] Anomaly detection: unusual behavior pattern alerts
-- [ ] Segment builder: define visitor segments by behavior rules
-- [ ] Public REST API with versioning (`/v1/sessions`, `/v1/events`)
-- [ ] GraphQL API for flexible querying
-- [ ] SDK plugins: React, Vue, Angular wrappers
-- [ ] Data export: CSV, JSON, warehouse connectors (BigQuery, Snowflake)
-- [ ] Documentation site with API reference
+- [ ] Client registration and login
+- [ ] Self-serve project creation and onboarding wizard
+- [ ] Billing (usage-based, Stripe)
+- [ ] Public REST API with versioning
+- [ ] Client-facing dashboard
+- [ ] Documentation site
+- [ ] SDK framework wrappers (React, Vue, Next.js)
+- [ ] Data export (CSV, webhook, warehouse connectors)
+- [ ] Consent/cookie compliance layer
+- [ ] GDPR/152-FZ data deletion and export
 
 **Dependencies:** Phase 9.
 
@@ -243,3 +323,4 @@ Master Reference Document. Created 2026-04-02.
 - Each phase builds on the previous; no phase should be started before its dependencies are marked complete.
 - Within a phase, tasks can be parallelized where there are no data dependencies.
 - The roadmap is a living document — update status and adjust scope as we learn.
+- **Current focus: Phase 6** — without project isolation, we cannot connect real client sites or train meaningful per-project models.

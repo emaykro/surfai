@@ -9,7 +9,10 @@ const { computeAndStore } = require("./features/store");
 // CORS — explicit origins; never open `*` in production
 // ---------------------------------------------------------------------------
 
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
+/** Always-allowed origins from ENV (surfai.ru, app.surfai.ru, etc.) */
+const STATIC_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:3000")
+  .split(",")
+  .map((o) => o.trim());
 
 // ---------------------------------------------------------------------------
 // Site key cache — avoids DB lookup on every batch
@@ -18,6 +21,39 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
 /** @type {Map<string, {projectId: string, siteId: string, allowedOrigins: string[], cachedAt: number}>} */
 const siteCache = new Map();
 const SITE_CACHE_TTL_MS = 60_000; // 60 seconds
+
+/** @type {{origins: Set<string>, cachedAt: number} | null} */
+let allOriginsCache = null;
+
+/**
+ * Build a Set of all allowed origins: static (ENV) + all sites' allowed_origins from DB.
+ * Cached for 60s to avoid DB hit on every preflight.
+ */
+async function getAllAllowedOrigins() {
+  if (allOriginsCache && Date.now() - allOriginsCache.cachedAt < SITE_CACHE_TTL_MS) {
+    return allOriginsCache.origins;
+  }
+  const origins = new Set(STATIC_ORIGINS);
+  try {
+    const { rows } = await pool.query("SELECT allowed_origins, domain FROM sites");
+    for (const row of rows) {
+      if (row.allowed_origins) {
+        for (const o of row.allowed_origins) origins.add(o);
+      }
+      // Also allow https://domain and https://www.domain as convenience
+      if (row.domain) {
+        origins.add(`https://${row.domain}`);
+        origins.add(`https://www.${row.domain}`);
+        origins.add(`http://${row.domain}`);
+        origins.add(`http://www.${row.domain}`);
+      }
+    }
+  } catch {
+    // DB not ready yet — fall back to static origins only
+  }
+  allOriginsCache = { origins, cachedAt: Date.now() };
+  return origins;
+}
 
 async function resolveSiteKey(siteKey) {
   const cached = siteCache.get(siteKey);
@@ -39,9 +75,10 @@ async function resolveSiteKey(siteKey) {
   return entry;
 }
 
-/** Invalidate cache for a specific site key */
+/** Invalidate all caches (called when sites are created/updated) */
 function invalidateSiteCache(siteKey) {
-  siteCache.delete(siteKey);
+  if (siteKey) siteCache.delete(siteKey);
+  allOriginsCache = null; // Force CORS reload
 }
 
 /** Default project/site for requests without siteKey */
@@ -49,7 +86,13 @@ const DEFAULT_PROJECT_ID = "default";
 const DEFAULT_SITE_ID = "default";
 
 fastify.register(require("@fastify/cors"), {
-  origin: CORS_ORIGIN.split(",").map((o) => o.trim()),
+  origin: async (origin, callback) => {
+    // Allow requests with no origin (curl, server-to-server)
+    if (!origin) return callback(null, true);
+    const allowed = await getAllAllowedOrigins();
+    if (allowed.has(origin)) return callback(null, true);
+    callback(null, false);
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -572,6 +615,9 @@ fastify.post(
        VALUES ($1, $2, $3, $4) RETURNING *`,
       [projectId, domain, origins, install_method || "gtm"]
     );
+
+    // Invalidate CORS cache so new domain is allowed immediately
+    invalidateSiteCache(null);
 
     return reply.code(201).send({ site: rows[0] });
   }

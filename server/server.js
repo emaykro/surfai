@@ -653,24 +653,48 @@ fastify.get("/api/sites/:siteId/verify", async (request, reply) => {
   };
 });
 
-// GET /api/sites/:siteId/snippet — return install snippet
+// GET /api/sites/:siteId/snippet — return install snippet with auto-configured goals
 fastify.get("/api/sites/:siteId/snippet", async (request, reply) => {
   const { siteId } = request.params;
 
   const { rows } = await pool.query(
-    "SELECT site_key, domain, install_method FROM sites WHERE site_id = $1",
+    "SELECT site_key, domain, install_method, project_id FROM sites WHERE site_id = $1",
     [siteId]
   );
   if (!rows.length) return reply.code(404).send({ error: "site not found" });
 
-  const { site_key, domain, install_method } = rows[0];
+  const { site_key, domain, install_method, project_id } = rows[0];
   const apiBase = process.env.API_BASE_URL || `http://localhost:${PORT}`;
+
+  // Fetch page_rule goals for this project that match this domain (or have no domain filter)
+  const goalsRes = await pool.query(
+    `SELECT goal_id, rules FROM goals
+     WHERE project_id = $1 AND type = 'page_rule' AND NOT is_deleted`,
+    [project_id]
+  );
+
+  const pageGoals = [];
+  for (const g of goalsRes.rows) {
+    const rules = g.rules || {};
+    // Include goal if it has no domain filter or matches this site's domain
+    if (!rules.domain || rules.domain === domain) {
+      pageGoals.push({
+        goalId: g.goal_id,
+        urlPattern: rules.urlPattern || "",
+        matchType: rules.matchType || "contains",
+      });
+    }
+  }
+
+  const pageGoalsStr = pageGoals.length > 0
+    ? `,\n        pageGoals: ${JSON.stringify(pageGoals)}`
+    : "";
 
   const directScript = `<script src="${apiBase}/dist/tracker.js"><\/script>
 <script>
-  const tracker = new SurfaiTracker({
+  var tracker = new SurfaiTracker({
     endpoint: "${apiBase}/api/events",
-    siteKey: "${site_key}"
+    siteKey: "${site_key}"${pageGoalsStr}
   });
   tracker.start();
 <\/script>`;
@@ -683,7 +707,7 @@ fastify.get("/api/sites/:siteId/snippet", async (request, reply) => {
     s.onload = function() {
       var tracker = new SurfaiTracker({
         endpoint: '${apiBase}/api/events',
-        siteKey: '${site_key}'
+        siteKey: '${site_key}'${pageGoalsStr}
       });
       tracker.start();
     };
@@ -695,6 +719,7 @@ fastify.get("/api/sites/:siteId/snippet", async (request, reply) => {
     siteKey: site_key,
     domain,
     installMethod: install_method,
+    pageGoals,
     snippets: {
       direct: directScript,
       gtm: gtmScript,

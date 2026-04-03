@@ -7,18 +7,89 @@ const app = $("#app");
 // API helpers
 // ---------------------------------------------------------------------------
 
+function getOperatorToken() {
+  return localStorage.getItem("surfai_operator_token") || "";
+}
+
+function setOperatorToken(token) {
+  localStorage.setItem("surfai_operator_token", token);
+}
+
+function clearOperatorToken() {
+  localStorage.removeItem("surfai_operator_token");
+}
+
 async function api(path, opts = {}) {
+  const token = getOperatorToken();
+  const headers = { "Content-Type": "application/json", ...opts.headers };
+  if (token) headers["Authorization"] = "Bearer " + token;
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...opts.headers },
+    headers,
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
+  if (res.status === 401) {
+    clearOperatorToken();
+    renderLogin("Session expired. Please log in again.");
+    throw new Error("unauthorized");
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || res.statusText);
   }
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Login screen
+// ---------------------------------------------------------------------------
+
+function renderLogin(errorMsg) {
+  updateNavVisibility(false);
+  app.innerHTML = `
+    <div class="login-wrapper">
+      <div class="login-card">
+        <h2 class="login-title">SURFAI</h2>
+        <p class="login-subtitle">Operator access</p>
+        ${errorMsg ? `<div class="login-error">${esc(errorMsg)}</div>` : ""}
+        <form id="login-form">
+          <div class="form-group">
+            <label>API Token</label>
+            <input type="password" name="token" required placeholder="Enter operator token" autofocus>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width:100%">Log in</button>
+        </form>
+      </div>
+    </div>`;
+
+  $("#login-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const token = new FormData(e.target).get("token").toString().trim();
+    if (!token) return;
+    setOperatorToken(token);
+    try {
+      await api("/api/projects");
+      render();
+    } catch (err) {
+      if (err.message === "unauthorized") return; // renderLogin already called
+      clearOperatorToken();
+      renderLogin("Invalid token");
+    }
+  };
+}
+
+function updateNavVisibility(show) {
+  const nav = $("#nav");
+  const logoutBtn = $("#logout-btn");
+  if (nav) nav.style.display = show ? "" : "none";
+  if (logoutBtn) logoutBtn.style.display = show ? "" : "none";
+}
+
+window.logout = function () {
+  clearOperatorToken();
+  window.location.hash = "";
+  renderLogin();
+};
 
 // ---------------------------------------------------------------------------
 // Router (hash-based)
@@ -38,6 +109,12 @@ window.addEventListener("hashchange", render);
 window.addEventListener("load", render);
 
 async function render() {
+  if (!getOperatorToken()) {
+    renderLogin();
+    return;
+  }
+  updateNavVisibility(true);
+
   const { parts } = getRoute();
 
   try {
@@ -55,7 +132,15 @@ async function render() {
       await renderProjects();
     }
   } catch (err) {
-    app.innerHTML = `<div class="card"><p style="color:var(--red)">Error: ${err.message}</p></div>`;
+    if (err.message === "unauthorized") return;
+    const errCard = document.createElement("div");
+    errCard.className = "card";
+    const errP = document.createElement("p");
+    errP.style.color = "var(--red)";
+    errP.textContent = "Error: " + err.message;
+    errCard.appendChild(errP);
+    app.innerHTML = "";
+    app.appendChild(errCard);
   }
 }
 
@@ -383,19 +468,30 @@ window.checkVerify = async function (siteId) {
     const el = $("#verify-result");
     const statusEl = $("#verify-status");
 
+    el.innerHTML = "";
+    const span = document.createElement("span");
     if (res.status === "verified") {
-      el.innerHTML = `<span style="color:var(--green)">Events received! Last event: ${timeAgo(res.lastEventAt)}</span>`;
+      span.style.color = "var(--green)";
+      span.textContent = "Events received! Last event: " + timeAgo(res.lastEventAt);
       statusEl.className = "status status-verified";
       statusEl.textContent = "verified";
     } else if (res.status === "stale") {
-      el.innerHTML = `<span style="color:var(--yellow)">Events were received but last event was ${timeAgo(res.lastEventAt)}. Check if tracker is still active.</span>`;
+      span.style.color = "var(--yellow)";
+      span.textContent = "Events were received but last event was " + timeAgo(res.lastEventAt) + ". Check if tracker is still active.";
       statusEl.className = "status status-stale";
       statusEl.textContent = "stale";
     } else {
-      el.innerHTML = `<span style="color:var(--text-dim)">No events received yet. Make sure the snippet is installed and visit the site.</span>`;
+      span.style.color = "var(--text-dim)";
+      span.textContent = "No events received yet. Make sure the snippet is installed and visit the site.";
     }
+    el.appendChild(span);
   } catch (err) {
-    $("#verify-result").innerHTML = `<span style="color:var(--red)">Error: ${err.message}</span>`;
+    const errSpan = document.createElement("span");
+    errSpan.style.color = "var(--red)";
+    errSpan.textContent = "Error: " + err.message;
+    const vr = $("#verify-result");
+    vr.innerHTML = "";
+    vr.appendChild(errSpan);
   }
 
   btn.textContent = "Check now";

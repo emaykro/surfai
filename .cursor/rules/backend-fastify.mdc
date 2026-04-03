@@ -18,6 +18,11 @@ alwaysApply: false
 - If persistence is needed, enqueue or hand off work after validation; do not keep the client connection open for downstream processing.
 - CORS policy must be explicit. Do not leave production ingest endpoints effectively open to every origin by accident.
 - Any backend contract change must be mirrored in the SDK types in the same change.
+- All operator/dashboard API endpoints must have `preHandler: [requireOperatorAuth]`. Ingest `POST /api/events` is public.
+- Origin validation must use `new URL(origin).origin` for strict comparison — never `startsWith`.
+- `siteKey` is required for ingest by default. `ALLOW_INGEST_WITHOUT_SITEKEY=true` is dev-only.
+- Body limit is 256 KB via Fastify `bodyLimit`. Security headers (`X-Content-Type-Options`, `X-Frame-Options`) are set via `onSend` hook.
+- Never log raw tokens or full siteKeys. Pino `redact` covers `req.headers.authorization`.
 
 ## Dashboard API Routes
 

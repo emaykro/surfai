@@ -50,8 +50,21 @@ See root `CLAUDE.md` for per-type data shapes. Any schema change must be mirrore
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PORT` | `3000` | Server listen port |
-| `CORS_ORIGIN` | `*` (dev only) | Allowed origins |
+| `CORS_ORIGIN` | `http://localhost:3000` | Allowed origins (comma-separated) |
 | `DATABASE_URL` | — | Postgres connection string |
+| `OPERATOR_API_TOKEN` | — (empty = all operator endpoints return 401) | Bearer token for operator/dashboard API |
+| `ALLOW_INGEST_WITHOUT_SITEKEY` | `false` | Set `true` for local dev without siteKey setup |
+| `LOG_LEVEL` | `info` | Pino log level |
+
+## Security
+
+- **Operator auth**: All operator/dashboard API routes require `Authorization: Bearer <OPERATOR_API_TOKEN>`. SSE endpoint also accepts `?token=` query param (EventSource limitation). Ingest `POST /api/events` remains public.
+- **siteKey**: Required by default in ingest. Without a valid siteKey the server returns 400. Set `ALLOW_INGEST_WITHOUT_SITEKEY=true` for local dev only.
+- **Origin validation**: Uses `new URL(origin).origin` for strict comparison (not `startsWith`). Only checks browser requests with `Origin` header; server-to-server requests without Origin are allowed through (siteKey serves as credential).
+- **Body limit**: 256 KB per request (Fastify `bodyLimit`).
+- **Security headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` on all responses.
+- **Log redaction**: `authorization` header is redacted from Pino logs. siteKey is truncated in warn-level origin mismatch logs.
+- **XSS**: Dashboard and cabinet use `textContent` / `esc()` for all dynamic data. No raw `innerHTML` with user/API data.
 
 ## Deployment Target
 

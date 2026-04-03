@@ -1,8 +1,42 @@
 require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
 
 const path = require("path");
-const fastify = require("fastify")({ logger: true });
+const fastify = require("fastify")({
+  logger: {
+    level: process.env.LOG_LEVEL || "info",
+    redact: ["req.headers.authorization"],
+  },
+  bodyLimit: 256 * 1024, // 256 KB — fits SDK contract (100 events × ~64KB max)
+});
 const { pool } = require("./db");
+
+// ---------------------------------------------------------------------------
+// Operator auth — bearer token from env
+// ---------------------------------------------------------------------------
+
+const OPERATOR_API_TOKEN = process.env.OPERATOR_API_TOKEN || "";
+
+async function requireOperatorAuth(request, reply) {
+  const auth = request.headers.authorization || "";
+  let token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  // SSE (EventSource) can't set headers — allow token via query param
+  if (!token && request.query && request.query.token) {
+    token = request.query.token;
+  }
+  if (!OPERATOR_API_TOKEN || token !== OPERATOR_API_TOKEN) {
+    return reply.code(401).send({ error: "unauthorized" });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Security headers
+// ---------------------------------------------------------------------------
+
+fastify.addHook("onSend", async (_request, reply, payload) => {
+  reply.header("X-Content-Type-Options", "nosniff");
+  reply.header("X-Frame-Options", "DENY");
+  return payload;
+});
 const { computeAndStore } = require("./features/store");
 
 // ---------------------------------------------------------------------------
@@ -79,9 +113,10 @@ function invalidateSiteCache(siteKey) {
   refreshCorsOrigins(); // Reload CORS immediately
 }
 
-/** Default project/site for requests without siteKey */
+/** Default project/site for requests without siteKey (dev-only fallback) */
 const DEFAULT_PROJECT_ID = "default";
 const DEFAULT_SITE_ID = "default";
+const ALLOW_INGEST_WITHOUT_SITEKEY = process.env.ALLOW_INGEST_WITHOUT_SITEKEY === "true";
 
 fastify.register(require("@fastify/cors"), {
   origin: (origin, callback) => {
@@ -330,9 +365,13 @@ fastify.post(
   async (request, reply) => {
     const { sessionId, siteKey, sentAt, events } = request.body;
 
-    // Resolve project/site from siteKey (or use defaults)
+    // Resolve project/site from siteKey
     let projectId = DEFAULT_PROJECT_ID;
     let siteId = DEFAULT_SITE_ID;
+
+    if (!siteKey && !ALLOW_INGEST_WITHOUT_SITEKEY) {
+      return reply.code(400).send({ error: "siteKey is required" });
+    }
 
     if (siteKey) {
       const site = await resolveSiteKey(siteKey);
@@ -344,11 +383,21 @@ fastify.post(
 
       // Origin validation (skip if allowed_origins is empty)
       if (site.allowedOrigins.length > 0) {
-        const origin = request.headers.origin || request.headers.referer || "";
-        const originMatch = site.allowedOrigins.some((ao) => origin.startsWith(ao));
-        if (!originMatch) {
-          fastify.log.warn({ siteKey, origin }, "origin mismatch");
-          return reply.code(403).send({ error: "origin not allowed" });
+        const rawOrigin = request.headers.origin || "";
+        // Only use Origin header for browser requests — never fall back to Referer
+        // which can be spoofed and has path info that weakens the check.
+        // Requests without Origin (server-to-server) are allowed through if
+        // the siteKey itself is valid — the key acts as the credential.
+        if (rawOrigin) {
+          let parsedOrigin;
+          try { parsedOrigin = new URL(rawOrigin).origin; } catch { parsedOrigin = ""; }
+          const allowedSet = new Set(site.allowedOrigins.map((ao) => {
+            try { return new URL(ao).origin; } catch { return ao; }
+          }));
+          if (!allowedSet.has(parsedOrigin)) {
+            fastify.log.warn({ siteKey: siteKey.slice(0, 8) + "…", origin: rawOrigin }, "origin mismatch");
+            return reply.code(403).send({ error: "origin not allowed" });
+          }
         }
       }
 
@@ -359,7 +408,7 @@ fastify.post(
       ).catch(() => {});
     }
 
-    fastify.log.info({ sessionId, projectId, siteId, eventCount: events.length }, "batch received");
+    fastify.log.info({ sessionId, projectId, siteId, eventCount: events.length, hasSiteKey: !!siteKey }, "batch received");
 
     // Respond immediately — DB write must not block the client
     reply.send({ ok: true });
@@ -398,7 +447,7 @@ function broadcastSSE(data) {
   }
 }
 
-fastify.get("/api/events/live", (request, reply) => {
+fastify.get("/api/events/live", { preHandler: [requireOperatorAuth] }, (request, reply) => {
   const raw = reply.raw;
   raw.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -432,7 +481,7 @@ fastify.get("/api/events/live", (request, reply) => {
 // GET /api/sessions — list sessions (dashboard)
 // ---------------------------------------------------------------------------
 
-fastify.get("/api/sessions", async (request) => {
+fastify.get("/api/sessions", { preHandler: [requireOperatorAuth] }, async (request) => {
   const limit = Math.min(parseInt(request.query.limit, 10) || 50, 200);
   const offset = Math.max(parseInt(request.query.offset, 10) || 0, 0);
   const projectId = request.query.project_id;
@@ -464,7 +513,7 @@ fastify.get("/api/sessions", async (request) => {
 // GET /api/sessions/:sessionId — session detail with events
 // ---------------------------------------------------------------------------
 
-fastify.get("/api/sessions/:sessionId", async (request, reply) => {
+fastify.get("/api/sessions/:sessionId", { preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { sessionId } = request.params;
 
   const sessionRes = await pool.query(
@@ -515,7 +564,7 @@ const projectBodySchema = {
 };
 
 // POST /api/projects — create project
-fastify.post("/api/projects", { schema: { body: projectBodySchema } }, async (request, reply) => {
+fastify.post("/api/projects", { schema: { body: projectBodySchema }, preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { name, vertical } = request.body;
 
   const { rows } = await pool.query(
@@ -527,7 +576,7 @@ fastify.post("/api/projects", { schema: { body: projectBodySchema } }, async (re
 });
 
 // GET /api/projects — list projects with stats
-fastify.get("/api/projects", async () => {
+fastify.get("/api/projects", { preHandler: [requireOperatorAuth] }, async () => {
   const { rows } = await pool.query(`
     SELECT p.*,
       (SELECT COUNT(*) FROM sites si WHERE si.project_id = p.project_id) AS sites_count,
@@ -544,7 +593,7 @@ fastify.get("/api/projects", async () => {
 });
 
 // GET /api/projects/:projectId — project detail
-fastify.get("/api/projects/:projectId", async (request, reply) => {
+fastify.get("/api/projects/:projectId", { preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { projectId } = request.params;
 
   const { rows } = await pool.query(
@@ -556,7 +605,7 @@ fastify.get("/api/projects/:projectId", async (request, reply) => {
 });
 
 // PUT /api/projects/:projectId — update project
-fastify.put("/api/projects/:projectId", async (request, reply) => {
+fastify.put("/api/projects/:projectId", { preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { projectId } = request.params;
   const { name, vertical, status } = request.body;
 
@@ -592,7 +641,7 @@ const siteBodySchema = {
 
 fastify.post(
   "/api/projects/:projectId/sites",
-  { schema: { body: siteBodySchema } },
+  { schema: { body: siteBodySchema }, preHandler: [requireOperatorAuth] },
   async (request, reply) => {
     const { projectId } = request.params;
     const { domain, allowed_origins, install_method } = request.body;
@@ -621,7 +670,7 @@ fastify.post(
 );
 
 // GET /api/projects/:projectId/sites — list sites for project
-fastify.get("/api/projects/:projectId/sites", async (request) => {
+fastify.get("/api/projects/:projectId/sites", { preHandler: [requireOperatorAuth] }, async (request) => {
   const { projectId } = request.params;
 
   const { rows } = await pool.query(
@@ -633,7 +682,7 @@ fastify.get("/api/projects/:projectId/sites", async (request) => {
 });
 
 // GET /api/sites/:siteId/verify — check if events received in last 5 min
-fastify.get("/api/sites/:siteId/verify", async (request, reply) => {
+fastify.get("/api/sites/:siteId/verify", { preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { siteId } = request.params;
 
   const { rows } = await pool.query(
@@ -654,7 +703,7 @@ fastify.get("/api/sites/:siteId/verify", async (request, reply) => {
 });
 
 // GET /api/sites/:siteId/snippet — return install snippet with auto-configured goals
-fastify.get("/api/sites/:siteId/snippet", async (request, reply) => {
+fastify.get("/api/sites/:siteId/snippet", { preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { siteId } = request.params;
 
   const { rows } = await pool.query(
@@ -745,7 +794,7 @@ const goalBodySchema = {
 };
 
 // POST /api/goals — create goal
-fastify.post("/api/goals", { schema: { body: goalBodySchema } }, async (request, reply) => {
+fastify.post("/api/goals", { schema: { body: goalBodySchema }, preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { name, type, rules, is_primary, attribution_window_ms, project_id } = request.body;
   const tenantId = request.headers["x-tenant-id"] || "default";
   const projectId = project_id || DEFAULT_PROJECT_ID;
@@ -760,7 +809,7 @@ fastify.post("/api/goals", { schema: { body: goalBodySchema } }, async (request,
 });
 
 // GET /api/goals — list goals (filterable by project_id or tenant_id)
-fastify.get("/api/goals", async (request) => {
+fastify.get("/api/goals", { preHandler: [requireOperatorAuth] }, async (request) => {
   const projectId = request.query.project_id;
   const tenantId = request.headers["x-tenant-id"] || "default";
 
@@ -778,7 +827,7 @@ fastify.get("/api/goals", async (request) => {
 });
 
 // PUT /api/goals/:goalId — update goal
-fastify.put("/api/goals/:goalId", async (request, reply) => {
+fastify.put("/api/goals/:goalId", { preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { goalId } = request.params;
   const { name, type, rules, is_primary, attribution_window_ms } = request.body;
 
@@ -806,7 +855,7 @@ fastify.put("/api/goals/:goalId", async (request, reply) => {
 });
 
 // DELETE /api/goals/:goalId — soft delete
-fastify.delete("/api/goals/:goalId", async (request, reply) => {
+fastify.delete("/api/goals/:goalId", { preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { goalId } = request.params;
 
   const { rows } = await pool.query(
@@ -835,7 +884,7 @@ const conversionBodySchema = {
   },
 };
 
-fastify.post("/api/conversions", { schema: { body: conversionBodySchema } }, async (request, reply) => {
+fastify.post("/api/conversions", { schema: { body: conversionBodySchema }, preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { sessionId, visitorId, goalId, value, metadata, ts } = request.body;
 
   if (!sessionId && !visitorId) {
@@ -899,7 +948,7 @@ fastify.post("/api/conversions", { schema: { body: conversionBodySchema } }, asy
 // GET /api/sessions/:sessionId/conversions — conversions for a session
 // ---------------------------------------------------------------------------
 
-fastify.get("/api/sessions/:sessionId/conversions", async (request, reply) => {
+fastify.get("/api/sessions/:sessionId/conversions", { preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { sessionId } = request.params;
 
   const { rows } = await pool.query(
@@ -920,7 +969,7 @@ fastify.get("/api/sessions/:sessionId/conversions", async (request, reply) => {
 
 const { getFeatures } = require("./features/store");
 
-fastify.get("/api/sessions/:sessionId/features", async (request, reply) => {
+fastify.get("/api/sessions/:sessionId/features", { preHandler: [requireOperatorAuth] }, async (request, reply) => {
   const { sessionId } = request.params;
 
   const features = await getFeatures(sessionId);

@@ -245,3 +245,18 @@ When adding or removing MCP servers, update **both** config files if the server 
 - Never capture text content, field values, or anything that could contain PII.
 - Backend must reject malformed payloads via schema; never coerce bad input.
 - Sanitize all values before SQL insertion; use parameterized queries only.
+- All operator/dashboard API endpoints require `Authorization: Bearer <OPERATOR_API_TOKEN>`. Ingest `POST /api/events` is public.
+- Ingest requires `siteKey` by default. Set `ALLOW_INGEST_WITHOUT_SITEKEY=true` for local dev only.
+- Origin validation uses strict `new URL().origin` comparison — never `startsWith`.
+- Dashboard and cabinet must use `textContent` or `esc()` for dynamic data — never raw `innerHTML` with API/DB content.
+- Body size limit: 256 KB (Fastify `bodyLimit`).
+- Security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`.
+- Logs must never contain raw tokens or full siteKeys; use Pino `redact` for `authorization` header.
+
+### Environment Variables (Security)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OPERATOR_API_TOKEN` | (empty — returns 401) | Bearer token for operator/dashboard API |
+| `ALLOW_INGEST_WITHOUT_SITEKEY` | `false` | Allow ingest without siteKey (dev only) |
+| `LOG_LEVEL` | `info` | Pino log level |

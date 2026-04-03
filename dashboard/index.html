@@ -488,6 +488,26 @@
     // =========================================================================
 
     const API = window.location.origin;
+
+    /** Escape HTML entities to prevent XSS when inserting into innerHTML templates */
+    function esc(str) {
+      const d = document.createElement("div");
+      d.textContent = String(str == null ? "" : str);
+      return d.innerHTML;
+    }
+
+    /** Read operator token from localStorage */
+    function getOperatorToken() {
+      return localStorage.getItem("surfai_operator_token") || "";
+    }
+
+    /** Authenticated fetch wrapper */
+    function authFetch(url, opts = {}) {
+      const token = getOperatorToken();
+      const headers = { ...(opts.headers || {}) };
+      if (token) headers["Authorization"] = "Bearer " + token;
+      return fetch(url, { ...opts, headers });
+    }
     let selectedSessionId = null;
     let replayAnimation = null;
     let currentFilter = "all";
@@ -520,14 +540,14 @@
 
     async function loadSessions() {
       try {
-        const res = await fetch(API + "/api/sessions?limit=100");
+        const res = await authFetch(API + "/api/sessions?limit=100");
         const data = await res.json();
         allSessions = data.sessions;
 
         // Enrich with conversion data from session_features
         await Promise.all(allSessions.map(async (s) => {
           try {
-            const fRes = await fetch(API + "/api/sessions/" + s.session_id + "/features");
+            const fRes = await authFetch(API + "/api/sessions/" + s.session_id + "/features");
             if (fRes.ok) {
               const fData = await fRes.json();
               s.converted = fData.features.converted || false;
@@ -565,22 +585,39 @@
         return;
       }
 
-      el.innerHTML = sessions.map((s) => {
+      el.innerHTML = "";
+      sessions.forEach((s) => {
         const shortId = s.session_id.slice(0, 8);
         const ago = timeAgo(new Date(s.last_seen_at));
         const active = s.session_id === selectedSessionId ? " active" : "";
-        const convBadge = s.converted
-          ? `<span class="conv-badge">CONV ${s.conversion_count > 1 ? "x" + s.conversion_count : ""}</span>`
-          : "";
-        return `
-          <div class="session-item${active}" data-id="${s.session_id}">
-            <div class="session-id">${shortId}...${s.session_id.slice(-4)} ${convBadge}</div>
-            <div class="session-meta">
-              <span>${s.event_count} events</span>
-              <span>${ago}</span>
-            </div>
-          </div>`;
-      }).join("");
+
+        const item = document.createElement("div");
+        item.className = "session-item" + active;
+        item.dataset.id = s.session_id;
+
+        const idDiv = document.createElement("div");
+        idDiv.className = "session-id";
+        idDiv.textContent = shortId + "..." + s.session_id.slice(-4) + " ";
+        if (s.converted) {
+          const badge = document.createElement("span");
+          badge.className = "conv-badge";
+          badge.textContent = "CONV" + (s.conversion_count > 1 ? " x" + s.conversion_count : "");
+          idDiv.appendChild(badge);
+        }
+
+        const metaDiv = document.createElement("div");
+        metaDiv.className = "session-meta";
+        const evSpan = document.createElement("span");
+        evSpan.textContent = s.event_count + " events";
+        const agoSpan = document.createElement("span");
+        agoSpan.textContent = ago;
+        metaDiv.appendChild(evSpan);
+        metaDiv.appendChild(agoSpan);
+
+        item.appendChild(idDiv);
+        item.appendChild(metaDiv);
+        el.appendChild(item);
+      });
 
       el.querySelectorAll(".session-item").forEach((item) => {
         item.addEventListener("click", () => selectSession(item.dataset.id));
@@ -626,8 +663,8 @@
 
       try {
         const [sessionRes, convRes] = await Promise.all([
-          fetch(API + "/api/sessions/" + sessionId),
-          fetch(API + "/api/sessions/" + sessionId + "/conversions"),
+          authFetch(API + "/api/sessions/" + sessionId),
+          authFetch(API + "/api/sessions/" + sessionId + "/conversions"),
         ]);
         const data = await sessionRes.json();
         const convData = convRes.ok ? await convRes.json() : { conversions: [] };
@@ -661,7 +698,7 @@
         <div class="detail-header">
           <div class="stat-card">
             <div class="stat-label">Session</div>
-            <div class="stat-value" style="font-size:13px;font-family:monospace;word-break:break-all">${session.session_id}</div>
+            <div class="stat-value" style="font-size:13px;font-family:monospace;word-break:break-all">${esc(session.session_id)}</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">Events</div>
@@ -692,10 +729,10 @@
             ${conversions.map((c) => {
               const time = new Date(parseInt(c.ts)).toLocaleTimeString("en-US", { hour12: false });
               return `<div class="goal-item">
-                <span class="goal-name">${c.goal_name || c.goal_id}</span>
-                <span class="goal-source">${c.source}</span>
-                ${c.value ? `<span style="color:var(--green)">$${c.value}</span>` : ""}
-                <span class="goal-time">${time}</span>
+                <span class="goal-name">${esc(c.goal_name || c.goal_id)}</span>
+                <span class="goal-source">${esc(c.source)}</span>
+                ${c.value ? `<span style="color:var(--green)">$${esc(c.value)}</span>` : ""}
+                <span class="goal-time">${esc(time)}</span>
               </div>`;
             }).join("")}
           </div>
@@ -999,7 +1036,9 @@
       const feed = document.getElementById("live-feed");
       let hasEvents = false;
 
-      const source = new EventSource(API + "/api/events/live");
+      const token = getOperatorToken();
+      const sseUrl = API + "/api/events/live" + (token ? "?token=" + encodeURIComponent(token) : "");
+      const source = new EventSource(sseUrl);
 
       source.onmessage = (event) => {
         const batch = JSON.parse(event.data);
@@ -1015,15 +1054,29 @@
           entry.className = "feed-entry";
 
           const time = new Date().toLocaleTimeString("en-US", { hour12: false });
-          const shortSession = batch.sessionId.slice(0, 8);
+          const shortSession = String(batch.sessionId).slice(0, 8);
           const dataStr = JSON.stringify(e.data);
 
-          entry.innerHTML = `
-            <span class="feed-time">${time}</span>
-            <span class="feed-session">${shortSession}</span>
-            <span class="feed-type ${e.type}">${e.type}</span>
-            <span class="feed-data">${dataStr}</span>
-          `;
+          const timeSpan = document.createElement("span");
+          timeSpan.className = "feed-time";
+          timeSpan.textContent = time;
+
+          const sessSpan = document.createElement("span");
+          sessSpan.className = "feed-session";
+          sessSpan.textContent = shortSession;
+
+          const typeSpan = document.createElement("span");
+          typeSpan.className = "feed-type " + esc(e.type);
+          typeSpan.textContent = e.type;
+
+          const dataSpan = document.createElement("span");
+          dataSpan.className = "feed-data";
+          dataSpan.textContent = dataStr;
+
+          entry.appendChild(timeSpan);
+          entry.appendChild(sessSpan);
+          entry.appendChild(typeSpan);
+          entry.appendChild(dataSpan);
 
           feed.prepend(entry);
 

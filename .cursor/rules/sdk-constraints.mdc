@@ -18,6 +18,7 @@ alwaysApply: false
 - `start()` and `stop()` must remain idempotent enough to avoid duplicate listeners or runaway timers.
 - Avoid long synchronous work inside event handlers, timers, or flush logic.
 - Any contract change in the SDK must be mirrored in the backend validation schema in the same change.
+- `siteKey` is required by the server in production. SDK must always include `siteKey` in every batch if configured.
 
 ## Goal & Conversion API (Phase 5)
 

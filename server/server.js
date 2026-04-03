@@ -75,6 +75,16 @@ async function refreshCorsOrigins() {
         origins.add(`https://www.${row.domain}`);
         origins.add(`http://${row.domain}`);
         origins.add(`http://www.${row.domain}`);
+        // IDN domains: browser sends punycode Origin, so add that too
+        try {
+          const punyOrigin = new URL(`https://${row.domain}`).origin;
+          if (punyOrigin !== `https://${row.domain}`) {
+            origins.add(punyOrigin);
+            origins.add(punyOrigin.replace("https://", "http://"));
+            origins.add(punyOrigin.replace("://", "://www."));
+            origins.add(punyOrigin.replace("://", "://www.").replace("https://", "http://"));
+          }
+        } catch { /* invalid domain — skip */ }
       }
     }
   } catch {

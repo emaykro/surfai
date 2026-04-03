@@ -414,3 +414,8 @@ export class SurfaiTracker {
     }
   }
 }
+
+// Auto-register on window for non-module script loading (GTM, direct <script> tags)
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).SurfaiTracker = SurfaiTracker;
+}

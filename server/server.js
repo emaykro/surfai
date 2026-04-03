@@ -935,10 +935,18 @@ fastify.post("/api/conversions", { schema: { body: conversionBodySchema }, preHa
     [resolvedSessionId, visitorId || null, goalId, value || null, JSON.stringify(metadata || {}), ts]
   );
 
+  // Check if goal is primary
+  const primaryRes = await pool.query(
+    "SELECT is_primary FROM goals WHERE goal_id = $1", [goalId]
+  );
+  const isPrimary = primaryRes.rows[0]?.is_primary || false;
+
   // Update session_features
   await pool.query(
     `UPDATE session_features
-     SET converted = true, conversion_count = COALESCE(conversion_count, 0) + 1
+     SET converted = true,
+         conversion_count = COALESCE(conversion_count, 0) + 1
+         ${isPrimary ? ", primary_goal_converted = true" : ""}
      WHERE session_id = $1`,
     [resolvedSessionId]
   );
@@ -1068,11 +1076,18 @@ async function persistGoalConversion(client, sessionId, goalData, projectId) {
     [sessionId, resolvedGoalId, value || null, JSON.stringify(metadata || {}), ts, projectId]
   );
 
+  // Check if goal is primary
+  const primaryRes = await client.query(
+    "SELECT is_primary FROM goals WHERE goal_id = $1", [resolvedGoalId]
+  );
+  const isPrimary = primaryRes.rows[0]?.is_primary || false;
+
   // Update session_features converted flag
   await client.query(
     `UPDATE session_features
      SET converted = true,
          conversion_count = COALESCE(conversion_count, 0) + 1
+         ${isPrimary ? ", primary_goal_converted = true" : ""}
      WHERE session_id = $1`,
     [sessionId]
   );

@@ -286,16 +286,26 @@ async function renderProjectDetail(projectId) {
 
     <div id="tab-goals" style="display:none">
       ${goals.length === 0
-        ? `<div class="empty"><p>No goals configured</p></div>`
-        : `<table>
-            <thead><tr><th>Name</th><th>Type</th><th>Primary</th><th>Created</th></tr></thead>
+        ? `<div class="empty"><p>No goals yet. Goals from Metrika will appear automatically after first visitor triggers a reachGoal.</p></div>`
+        : `<p style="color:var(--text-dim);font-size:13px;margin-bottom:12px">Primary goals are used as conversion labels for ML training. Mark the goals that represent real business conversions.</p>
+          <table>
+            <thead><tr><th>Name</th><th>Source</th><th>Primary (ML label)</th><th>Created</th><th></th></tr></thead>
             <tbody>
               ${goals.map((g) => `
                 <tr style="cursor:default">
                   <td><strong>${esc(g.name)}</strong></td>
-                  <td>${g.type}</td>
-                  <td>${g.is_primary ? '<span style="color:var(--green)">Yes</span>' : "No"}</td>
+                  <td><span class="vertical-badge">${g.type === 'js_sdk' && g.name.startsWith('ym_') ? 'metrika' : g.type}</span></td>
+                  <td>
+                    <button class="btn btn-sm ${g.is_primary ? 'btn-primary' : 'btn-secondary'}"
+                      onclick="togglePrimary('${g.goal_id}', ${!g.is_primary}, '${projectId}')">
+                      ${g.is_primary ? 'PRIMARY' : 'set primary'}
+                    </button>
+                  </td>
                   <td>${new Date(g.created_at).toLocaleDateString()}</td>
+                  <td>
+                    <button class="btn btn-sm btn-secondary" style="color:var(--red)"
+                      onclick="deleteGoal('${g.goal_id}', '${projectId}')">del</button>
+                  </td>
                 </tr>
               `).join("")}
             </tbody>
@@ -496,6 +506,35 @@ window.checkVerify = async function (siteId) {
 
   btn.textContent = "Check now";
   btn.disabled = false;
+};
+
+// ---------------------------------------------------------------------------
+// Goal management
+// ---------------------------------------------------------------------------
+
+window.togglePrimary = async function (goalId, newValue, projectId) {
+  await api(`/api/goals/${goalId}`, { method: "PUT", body: { is_primary: newValue } });
+  await renderProjectDetail(projectId);
+  // Switch to goals tab after re-render
+  document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+  const goalsTab = document.querySelector('[data-tab="goals"]');
+  if (goalsTab) { goalsTab.classList.add("active"); }
+  const sitesDiv = document.getElementById("tab-sites");
+  const goalsDiv = document.getElementById("tab-goals");
+  if (sitesDiv) sitesDiv.style.display = "none";
+  if (goalsDiv) goalsDiv.style.display = "";
+};
+
+window.deleteGoal = async function (goalId, projectId) {
+  await api(`/api/goals/${goalId}`, { method: "DELETE" });
+  await renderProjectDetail(projectId);
+  document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+  const goalsTab = document.querySelector('[data-tab="goals"]');
+  if (goalsTab) { goalsTab.classList.add("active"); }
+  const sitesDiv = document.getElementById("tab-sites");
+  const goalsDiv = document.getElementById("tab-goals");
+  if (sitesDiv) sitesDiv.style.display = "none";
+  if (goalsDiv) goalsDiv.style.display = "";
 };
 
 // ---------------------------------------------------------------------------

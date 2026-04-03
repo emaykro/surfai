@@ -1,0 +1,27 @@
+[Unit]
+Description=SURFAI Behavioral Analytics Server
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=surfai
+Group=surfai
+WorkingDirectory=/opt/surfai
+ExecStart=/usr/bin/node server/server.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=surfai
+
+EnvironmentFile=/opt/surfai/.env
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/surfai
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

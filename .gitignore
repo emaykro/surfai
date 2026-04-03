@@ -8,6 +8,7 @@ client/dist/
 .env
 .env.*
 !.env.example
+!deploy/.env.production
 
 # OS files
 .DS_Store

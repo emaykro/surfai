@@ -739,11 +739,13 @@ fastify.get("/api/sites/:siteId/snippet", { preHandler: [requireOperatorAuth] },
     ? `,\n        pageGoals: ${JSON.stringify(pageGoals)}`
     : "";
 
+  const extraOpts = `${pageGoalsStr},\n        metrikaCapture: true`;
+
   const directScript = `<script src="${apiBase}/dist/tracker.js"><\/script>
 <script>
   var tracker = new SurfaiTracker({
     endpoint: "${apiBase}/api/events",
-    siteKey: "${site_key}"${pageGoalsStr}
+    siteKey: "${site_key}"${extraOpts}
   });
   tracker.start();
 <\/script>`;
@@ -756,7 +758,7 @@ fastify.get("/api/sites/:siteId/snippet", { preHandler: [requireOperatorAuth] },
     s.onload = function() {
       var tracker = new SurfaiTracker({
         endpoint: '${apiBase}/api/events',
-        siteKey: '${site_key}'${pageGoalsStr}
+        siteKey: '${site_key}'${extraOpts}
       });
       tracker.start();
     };

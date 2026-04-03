@@ -49,6 +49,10 @@ export class SurfaiTracker {
   private dataLayerMappings: DataLayerMapping[];
   private origDataLayerPush: ((...args: unknown[]) => number) | null = null;
 
+  /** Yandex.Metrika reachGoal capture */
+  private metrikaCapture: boolean;
+  private origYm: ((...args: unknown[]) => void) | null = null;
+
   /** Batch limits (per sdk-constraints.mdc) */
   private static readonly MAX_EVENTS_PER_FLUSH = 100;
   private static readonly MAX_PAYLOAD_BYTES = 64 * 1024;
@@ -77,6 +81,7 @@ export class SurfaiTracker {
       ...SurfaiTracker.DEFAULT_DL_MAPPINGS,
       ...(opts.dataLayerMappings ?? []),
     ];
+    this.metrikaCapture = opts.metrikaCapture ?? false;
   }
 
   // --- Public API ----------------------------------------------------------
@@ -158,6 +163,11 @@ export class SurfaiTracker {
     if (this.dataLayerCapture) {
       this.hookDataLayer();
     }
+
+    // Yandex.Metrika reachGoal auto-capture
+    if (this.metrikaCapture) {
+      this.hookMetrika();
+    }
   }
 
   stop(): void {
@@ -187,6 +197,11 @@ export class SurfaiTracker {
     // Restore dataLayer.push if hooked
     if (this.origDataLayerPush) {
       this.unhookDataLayer();
+    }
+
+    // Restore ym if hooked
+    if (this.origYm) {
+      this.unhookMetrika();
     }
 
     this.flush(); // send remaining data
@@ -321,6 +336,52 @@ export class SurfaiTracker {
       dlEvent: eventName,
       ...(value !== undefined ? { value } : {}),
     });
+  }
+
+  // --- Yandex.Metrika reachGoal auto-capture --------------------------------
+
+  private hookMetrika(): void {
+    const win = window as Window & { ym?: (...args: unknown[]) => void };
+
+    const patchYm = (): boolean => {
+      if (typeof win.ym !== "function") return false;
+      if (this.origYm) return true; // already patched
+
+      this.origYm = win.ym.bind(win);
+      const self = this;
+
+      win.ym = function (...args: unknown[]): void {
+        // ym(counterId, 'reachGoal', goalName, params?)
+        if (args[1] === "reachGoal" && typeof args[2] === "string") {
+          const goalName = args[2];
+          self.goal(`ym_${goalName}`, {
+            source: "metrika",
+            ymGoal: goalName,
+          });
+        }
+        return self.origYm!(...args);
+      };
+      return true;
+    };
+
+    // Try now, and retry every 500ms for up to 10s (Metrika may load late)
+    if (!patchYm()) {
+      let attempts = 0;
+      const interval = setInterval(() => {
+        attempts++;
+        if (patchYm() || attempts >= 20 || !this.running) {
+          clearInterval(interval);
+        }
+      }, 500);
+    }
+  }
+
+  private unhookMetrika(): void {
+    const win = window as Window & { ym?: (...args: unknown[]) => void };
+    if (win.ym && this.origYm) {
+      win.ym = this.origYm;
+      this.origYm = null;
+    }
   }
 
   // --- Page lifecycle handlers (sendBeacon fallback) -----------------------

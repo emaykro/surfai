@@ -141,4 +141,6 @@ export interface TrackerOptions {
   dataLayerCapture?: boolean;
   /** Custom dataLayer event → goal mappings. Merged with defaults. */
   dataLayerMappings?: DataLayerMapping[];
+  /** Enable Yandex.Metrika reachGoal auto-capture. Default: false */
+  metrikaCapture?: boolean;
 }

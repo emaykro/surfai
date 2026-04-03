@@ -1,0 +1,73 @@
+---
+description: Global synchronization protocol between Cursor editor and Claude Code CLI
+globs: "*.*"
+alwaysApply: true
+---
+
+# Meta-Sync Protocol
+
+This project is maintained by **two AI agents** simultaneously:
+1. **Cursor** (IDE agent editing via `.mdc` rules)
+2. **Claude Code** (CLI agent reading `CLAUDE.md` files)
+
+Both agents MUST stay synchronized. Drift between them causes silent breakage.
+
+## Cursor's Obligations
+
+When you (Cursor) make any of the following changes, you MUST update the corresponding `CLAUDE.md` files so that the CLI agent does not lose context:
+
+- **Architecture change** (new module, renamed folder, new service) → update root `CLAUDE.md` Directory Layout and relevant `*/CLAUDE.md`.
+- **Dependency added or removed** → update Build & Run section in root `CLAUDE.md` and the affected sub-package `CLAUDE.md`.
+- **Data Contract change** (new field, renamed field, new event type) → update the Event Data Contract section in root `CLAUDE.md`, `data-contract.mdc`, and both `client/CLAUDE.md` and `server/CLAUDE.md`.
+- **New environment variable** → update `server/CLAUDE.md` env table and root `CLAUDE.md` Build & Run.
+- **New npm script or build step** → update Build & Run in root `CLAUDE.md`.
+
+## Claude Code's Obligations
+
+When Claude Code (CLI) makes any of the above changes, it MUST update the corresponding `.mdc` files inside `.cursor/rules/`:
+
+- `data-contract.mdc` — if the event schema changed.
+- `sdk-constraints.mdc` — if SDK behavior, batch limits, or security rules changed.
+- `backend-fastify.mdc` — if server routes, validation, logging, or CORS config changed.
+- This file (`meta-sync.mdc`) — if the sync protocol itself needs amendment.
+
+## Vault Workflow (persistent context layer)
+
+The `vault/` directory is a shared persistent knowledge store for both agents.
+It survives context resets, session restarts, and compaction.
+
+### Structure
+
+- `vault/sessions/` — end-of-day session summaries
+- `vault/decisions/` — architectural decision records
+- `vault/bugs/` — bug investigation logs
+
+### Session Save Protocol
+
+When the user writes **"сохрани сессию"**, the active agent MUST:
+
+1. Analyze all work done in the current session.
+2. Create `vault/sessions/YYYY-MM-DD <descriptive sentence>.md` containing:
+   what was done, key decisions, current state, next steps, open questions.
+3. The filename must be a long, descriptive statement (not a short label).
+
+### Cold-Start Protocol
+
+At the start of every session, the active agent SHOULD read recent files in `vault/sessions/`
+to recover context from prior work.
+
+### Both Agents' Obligations
+
+- Both Cursor and Claude Code must read from and write to the Vault.
+- Vault files are append-only by default (update only to correct errors).
+- When making an architectural decision, also record it in `vault/decisions/`.
+- When resolving a non-trivial bug, record it in `vault/bugs/`.
+
+## Verification Checklist
+
+Before completing any change, both agents must mentally verify:
+
+1. Does `CLAUDE.md` (root + sub) reflect the current truth?
+2. Do `.cursor/rules/*.mdc` reflect the current truth?
+3. Do SDK types and backend schema still match the Data Contract?
+4. Has the Vault been updated if a significant decision or session boundary occurred?

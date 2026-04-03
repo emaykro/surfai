@@ -1,0 +1,43 @@
+---
+description: Fastify ingest rules for event validation and response behavior
+globs: "server/**/*.js"
+alwaysApply: false
+---
+
+# Backend Fastify Rules
+
+- All ingest endpoints must be implemented as Fastify routes with an explicit JSON Schema on the route definition.
+- The route schema is mandatory and must validate the full payload contract:
+  - required `sessionId`, `sentAt`, `events`
+  - strict event unions for `mouse`, `scroll`, `idle`
+  - numeric constraints such as `percent <= 100`
+- Never trust `request.body` shape without schema validation; invalid payloads must be rejected automatically with `4xx`.
+- Keep the request path fast: acknowledge valid ingest requests immediately with HTTP `200` and a tiny JSON body such as `{"ok":true}`.
+- Do not perform slow synchronous work in the request handler.
+- Logging must be lightweight and structured through Fastify/Pino; avoid noisy `console.log` per event and never block the event loop with file I/O.
+- If persistence is needed, enqueue or hand off work after validation; do not keep the client connection open for downstream processing.
+- CORS policy must be explicit. Do not leave production ingest endpoints effectively open to every origin by accident.
+- Any backend contract change must be mirrored in the SDK types in the same change.
+
+## Dashboard API Routes
+
+- `GET /api/sessions` — list sessions with event counts. Supports `limit` (max 200) and `offset` query params.
+- `GET /api/sessions/:sessionId` — session detail with events (up to 5000). Optional `?type=` filter.
+- `GET /api/events/live` — Server-Sent Events stream. Broadcasts each batch after persistence. Keep-alive every 15s.
+- `GET /api/sessions/:sessionId/conversions` — List conversions with goal name/type.
+- `POST /api/goals` — Create goal (name, type, rules, is_primary). Tenant via `X-Tenant-Id` header.
+- `GET /api/goals` — List goals for tenant.
+- `PUT /api/goals/:goalId` — Update goal.
+- `DELETE /api/goals/:goalId` — Soft-delete goal.
+- `POST /api/conversions` — Server-side conversion registration (requires `sessionId` or `visitorId` + `goalId`).
+- Dashboard files are served from `dashboard/` under `/dashboard/` prefix via a second `@fastify/static` registration.
+
+## Feature Engineering Pipeline
+
+- `server/features/extractors.js` — modular extractors for each event type (mouse, scroll, click, form, engagement, session, context, cross_session).
+- `server/features/store.js` — `computeAndStore(sessionId)` fetches all events, extracts features, upserts into `session_features`.
+- `server/features/backfill.js` — batch backfill script for existing sessions (`npm run backfill`).
+- Features are recomputed on every batch arrival (fire-and-forget after persistence + SSE broadcast).
+- `GET /api/sessions/:sessionId/features` — returns computed ML feature vector for a session.
+- Migration 004: `session_features` table with mouse dynamics, scroll behavior, click patterns, form behavior, engagement, session-level, context, and cross-session features.
+- Sliding-window aggregation stored as JSONB (1s, 5s, 30s windows for mouse velocity).

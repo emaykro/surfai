@@ -1,0 +1,13 @@
+{
+  "name": "surfai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SURFAI — Behavioral Analytics Platform",
+  "scripts": {
+    "build": "cd client && npx tsc",
+    "start": "cd server && node server.js",
+    "dev": "npm run build && npm start",
+    "test": "cd client && npm test && cd ../server && npm test",
+    "migrate": "cd server && node migrate.js"
+  }
+}

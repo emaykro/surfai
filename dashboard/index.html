@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SURFAI Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #232734;
+      --border: #2e3345;
+      --text: #e1e4ed;
+      --text-dim: #8b90a0;
+      --accent: #6c7cff;
+      --accent-dim: rgba(108,124,255,0.15);
+      --green: #34d399;
+      --red: #f87171;
+      --orange: #fbbf24;
+      --radius: 8px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      grid-template-rows: 56px 1fr;
+      overflow: hidden;
+    }
+
+    /* Header */
+    header {
+      grid-column: 1 / -1;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 16px;
+    }
+
+    header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    header h1 span { color: var(--accent); }
+
+    .live-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--green);
+      background: rgba(52,211,153,0.1);
+      padding: 4px 10px;
+      border-radius: 12px;
+    }
+
+    .live-dot {
+      width: 6px; height: 6px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .header-stats {
+      margin-left: auto;
+      display: flex;
+      gap: 20px;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    .header-stats strong {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    /* Sidebar — session list */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .sidebar-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .sidebar-header h2 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-dim);
+    }
+
+    .sidebar-header button {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .sidebar-header button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .session-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .session-item {
+      padding: 10px 12px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      margin-bottom: 4px;
+      transition: background 0.15s;
+    }
+
+    .session-item:hover { background: var(--surface2); }
+    .session-item.active { background: var(--accent-dim); border: 1px solid var(--accent); }
+
+    .session-id {
+      font-size: 12px;
+      font-family: monospace;
+      color: var(--accent);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .session-meta {
+      display: flex;
+      gap: 12px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* Main area */
+    .main {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      padding: 0 16px;
+    }
+
+    .tab {
+      padding: 10px 16px;
+      font-size: 13px;
+      color: var(--text-dim);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* Tab content */
+    .tab-content { flex: 1; overflow: hidden; display: none; }
+    .tab-content.active { display: flex; flex-direction: column; }
+
+    /* Live feed */
+    .live-feed {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      font-family: monospace;
+      font-size: 12px;
+      line-height: 1.8;
+    }
+
+    .feed-entry {
+      display: flex;
+      gap: 12px;
+      padding: 2px 0;
+      opacity: 0;
+      animation: fadeIn 0.3s forwards;
+    }
+
+    @keyframes fadeIn { to { opacity: 1; } }
+
+    .feed-time { color: var(--text-dim); flex-shrink: 0; }
+    .feed-session { color: var(--accent); width: 80px; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+
+    .feed-type {
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 500;
+      flex-shrink: 0;
+      width: 90px;
+      text-align: center;
+    }
+
+    .feed-type.mouse { background: rgba(99,102,241,0.2); color: #818cf8; }
+    .feed-type.scroll { background: rgba(52,211,153,0.2); color: #34d399; }
+    .feed-type.idle { background: rgba(251,191,36,0.2); color: #fbbf24; }
+    .feed-type.click { background: rgba(248,113,113,0.2); color: #f87171; }
+    .feed-type.form { background: rgba(192,132,252,0.2); color: #c084fc; }
+    .feed-type.engagement { background: rgba(45,212,191,0.2); color: #2dd4bf; }
+    .feed-type.session { background: rgba(251,146,60,0.2); color: #fb923c; }
+    .feed-type.context { background: rgba(148,163,184,0.2); color: #94a3b8; }
+    .feed-type.cross_session { background: rgba(244,114,182,0.2); color: #f472b6; }
+    .feed-type.goal { background: rgba(52,211,153,0.2); color: #34d399; }
+
+    .feed-data { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Conversion badge */
+    .conv-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: rgba(52,211,153,0.15);
+      color: var(--green);
+    }
+
+    /* Conversion filter */
+    .filter-bar {
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 6px;
+    }
+
+    .filter-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .filter-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+    /* Goal timeline in detail */
+    .goal-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .goal-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: var(--surface2);
+      border-radius: var(--radius);
+      font-size: 12px;
+    }
+
+    .goal-item .goal-name { color: var(--green); font-weight: 600; }
+    .goal-item .goal-time { color: var(--text-dim); font-family: monospace; font-size: 11px; }
+    .goal-item .goal-source { color: var(--text-dim); font-size: 10px; padding: 1px 5px; background: var(--surface); border-radius: 3px; }
+
+    /* Session detail */
+    .session-detail {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    .detail-header {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      min-width: 140px;
+    }
+
+    .stat-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-value { font-size: 20px; font-weight: 600; margin-top: 4px; }
+
+    /* Replay canvas */
+    .replay-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .replay-section h3 {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .replay-canvas-wrap {
+      position: relative;
+      background: #fff;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .replay-canvas-wrap canvas {
+      display: block;
+      width: 100%;
+    }
+
+    .replay-controls {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      align-items: center;
+    }
+
+    .replay-controls button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .replay-controls button:hover { opacity: 0.85; }
+
+    .replay-controls .speed {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-left: auto;
+    }
+
+    .replay-progress {
+      width: 100%;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      margin-top: 8px;
+      overflow: hidden;
+    }
+
+    .replay-progress-bar {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.1s linear;
+    }
+
+    /* Event timeline */
+    .timeline-canvas-wrap {
+      background: var(--surface2);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .timeline-canvas-wrap canvas {
+      display: block;
+      width: 100%;
+    }
+
+    /* Empty state */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-dim);
+      font-size: 14px;
+      gap: 8px;
+    }
+
+    .empty-state .icon { font-size: 32px; opacity: 0.5; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>SURF</span>AI</h1>
+    <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+    <div class="header-stats">
+      <span>Sessions: <strong id="total-sessions">0</strong></span>
+      <span>Conversions: <strong id="total-conversions">0</strong></span>
+      <span>Conv. Rate: <strong id="conv-rate">0%</strong></span>
+      <span>Events/min: <strong id="events-per-min">0</strong></span>
+    </div>
+  </header>
+
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>Sessions</h2>
+      <button id="refresh-btn">Refresh</button>
+    </div>
+    <div class="filter-bar">
+      <button class="filter-btn active" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="converted">Converted</button>
+      <button class="filter-btn" data-filter="not-converted">Not Conv.</button>
+    </div>
+    <div class="session-list" id="session-list">
+      <div class="empty-state">
+        <div class="icon">...</div>
+        Loading sessions
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="tabs">
+      <div class="tab active" data-tab="live">Live Feed</div>
+      <div class="tab" data-tab="detail">Session Detail</div>
+    </div>
+
+    <!-- Live Feed tab -->
+    <div class="tab-content active" id="tab-live">
+      <div class="live-feed" id="live-feed">
+        <div class="empty-state">
+          <div class="icon">~</div>
+          Waiting for events...
+        </div>
+      </div>
+    </div>
+
+    <!-- Session Detail tab -->
+    <div class="tab-content" id="tab-detail">
+      <div class="session-detail" id="session-detail">
+        <div class="empty-state">
+          <div class="icon">&lt;-</div>
+          Select a session from the sidebar
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // SURFAI Dashboard — vanilla JS, zero deps
+    // =========================================================================
+
+    const API = window.location.origin;
+    let selectedSessionId = null;
+    let replayAnimation = null;
+    let currentFilter = "all";
+    let allSessions = [];
+
+    // --- Event rate tracking -------------------------------------------------
+
+    const recentEvents = [];
+
+    function trackEventRate(count) {
+      recentEvents.push({ ts: Date.now(), count });
+      const cutoff = Date.now() - 60_000;
+      while (recentEvents.length && recentEvents[0].ts < cutoff) recentEvents.shift();
+      const total = recentEvents.reduce((s, e) => s + e.count, 0);
+      document.getElementById("events-per-min").textContent = total;
+    }
+
+    // --- Tabs -----------------------------------------------------------------
+
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+        document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
+      });
+    });
+
+    // --- Session list --------------------------------------------------------
+
+    async function loadSessions() {
+      try {
+        const res = await fetch(API + "/api/sessions?limit=100");
+        const data = await res.json();
+        allSessions = data.sessions;
+
+        // Enrich with conversion data from session_features
+        await Promise.all(allSessions.map(async (s) => {
+          try {
+            const fRes = await fetch(API + "/api/sessions/" + s.session_id + "/features");
+            if (fRes.ok) {
+              const fData = await fRes.json();
+              s.converted = fData.features.converted || false;
+              s.conversion_count = fData.features.conversion_count || 0;
+            }
+          } catch { /* ignore — features may not exist yet */ }
+        }));
+
+        renderSessionList();
+        updateHeaderStats();
+      } catch (err) {
+        console.error("Failed to load sessions:", err);
+      }
+    }
+
+    function updateHeaderStats() {
+      const total = allSessions.length;
+      const converted = allSessions.filter((s) => s.converted).length;
+      const rate = total > 0 ? Math.round((converted / total) * 100) : 0;
+
+      document.getElementById("total-sessions").textContent = total;
+      document.getElementById("total-conversions").textContent = converted;
+      document.getElementById("conv-rate").textContent = rate + "%";
+    }
+
+    function renderSessionList() {
+      const el = document.getElementById("session-list");
+      let sessions = allSessions;
+
+      if (currentFilter === "converted") sessions = sessions.filter((s) => s.converted);
+      else if (currentFilter === "not-converted") sessions = sessions.filter((s) => !s.converted);
+
+      if (!sessions.length) {
+        el.innerHTML = '<div class="empty-state"><div class="icon">0</div>No sessions</div>';
+        return;
+      }
+
+      el.innerHTML = sessions.map((s) => {
+        const shortId = s.session_id.slice(0, 8);
+        const ago = timeAgo(new Date(s.last_seen_at));
+        const active = s.session_id === selectedSessionId ? " active" : "";
+        const convBadge = s.converted
+          ? `<span class="conv-badge">CONV ${s.conversion_count > 1 ? "x" + s.conversion_count : ""}</span>`
+          : "";
+        return `
+          <div class="session-item${active}" data-id="${s.session_id}">
+            <div class="session-id">${shortId}...${s.session_id.slice(-4)} ${convBadge}</div>
+            <div class="session-meta">
+              <span>${s.event_count} events</span>
+              <span>${ago}</span>
+            </div>
+          </div>`;
+      }).join("");
+
+      el.querySelectorAll(".session-item").forEach((item) => {
+        item.addEventListener("click", () => selectSession(item.dataset.id));
+      });
+    }
+
+    // Filter buttons
+    document.querySelectorAll(".filter-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".filter-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        currentFilter = btn.dataset.filter;
+        renderSessionList();
+      });
+    });
+
+    function timeAgo(date) {
+      const s = Math.floor((Date.now() - date.getTime()) / 1000);
+      if (s < 60) return s + "s ago";
+      if (s < 3600) return Math.floor(s / 60) + "m ago";
+      if (s < 86400) return Math.floor(s / 3600) + "h ago";
+      return Math.floor(s / 86400) + "d ago";
+    }
+
+    // --- Session detail ------------------------------------------------------
+
+    async function selectSession(sessionId) {
+      selectedSessionId = sessionId;
+
+      // Highlight in list
+      document.querySelectorAll(".session-item").forEach((item) => {
+        item.classList.toggle("active", item.dataset.id === sessionId);
+      });
+
+      // Switch to detail tab
+      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
+      document.querySelector('[data-tab="detail"]').classList.add("active");
+      document.getElementById("tab-detail").classList.add("active");
+
+      const detail = document.getElementById("session-detail");
+      detail.innerHTML = '<div class="empty-state">Loading...</div>';
+
+      try {
+        const [sessionRes, convRes] = await Promise.all([
+          fetch(API + "/api/sessions/" + sessionId),
+          fetch(API + "/api/sessions/" + sessionId + "/conversions"),
+        ]);
+        const data = await sessionRes.json();
+        const convData = convRes.ok ? await convRes.json() : { conversions: [] };
+        data.conversions = convData.conversions;
+        renderSessionDetail(data);
+      } catch (err) {
+        detail.innerHTML = '<div class="empty-state">Failed to load session</div>';
+      }
+    }
+
+    function renderSessionDetail(data) {
+      const { session, events, eventCount, conversions } = data;
+      const detail = document.getElementById("session-detail");
+
+      // Compute stats
+      const typeCounts = {};
+      events.forEach((e) => { typeCounts[e.type] = (typeCounts[e.type] || 0) + 1; });
+
+      const mouseEvents = events.filter((e) => e.type === "mouse");
+      const clickEvents = events.filter((e) => e.type === "click");
+      const scrollEvents = events.filter((e) => e.type === "scroll");
+      const maxScroll = scrollEvents.reduce((m, e) => Math.max(m, e.data.percent || 0), 0);
+
+      const firstTs = events.length ? events[0].ts : 0;
+      const lastTs = events.length ? events[events.length - 1].ts : 0;
+      const durationSec = Math.round((lastTs - firstTs) / 1000);
+
+      const convCount = conversions ? conversions.length : 0;
+
+      detail.innerHTML = `
+        <div class="detail-header">
+          <div class="stat-card">
+            <div class="stat-label">Session</div>
+            <div class="stat-value" style="font-size:13px;font-family:monospace;word-break:break-all">${session.session_id}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Events</div>
+            <div class="stat-value">${eventCount}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Duration</div>
+            <div class="stat-value">${durationSec}s</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Max Scroll</div>
+            <div class="stat-value">${maxScroll}%</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Clicks</div>
+            <div class="stat-value">${clickEvents.length}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Conversions</div>
+            <div class="stat-value" style="color:${convCount > 0 ? 'var(--green)' : 'var(--text)'}">${convCount}</div>
+          </div>
+        </div>
+
+        ${convCount > 0 ? `
+        <div class="replay-section">
+          <h3>Goal Conversions</h3>
+          <div class="goal-list">
+            ${conversions.map((c) => {
+              const time = new Date(parseInt(c.ts)).toLocaleTimeString("en-US", { hour12: false });
+              return `<div class="goal-item">
+                <span class="goal-name">${c.goal_name || c.goal_id}</span>
+                <span class="goal-source">${c.source}</span>
+                ${c.value ? `<span style="color:var(--green)">$${c.value}</span>` : ""}
+                <span class="goal-time">${time}</span>
+              </div>`;
+            }).join("")}
+          </div>
+        </div>` : ""}
+
+        ${mouseEvents.length ? `
+        <div class="replay-section">
+          <h3>Mouse Trail Replay</h3>
+          <div class="replay-canvas-wrap">
+            <canvas id="replay-canvas" width="960" height="540"></canvas>
+          </div>
+          <div class="replay-controls">
+            <button id="replay-play">Play</button>
+            <button id="replay-reset">Reset</button>
+            <span class="speed">Speed: <select id="replay-speed">
+              <option value="1">1x</option>
+              <option value="2">2x</option>
+              <option value="5" selected>5x</option>
+              <option value="10">10x</option>
+            </select></span>
+          </div>
+          <div class="replay-progress"><div class="replay-progress-bar" id="replay-bar"></div></div>
+        </div>` : ""}
+
+        ${clickEvents.length ? `
+        <div class="replay-section">
+          <h3>Click Heatmap</h3>
+          <div class="replay-canvas-wrap">
+            <canvas id="click-canvas" width="960" height="540"></canvas>
+          </div>
+        </div>` : ""}
+
+        ${scrollEvents.length ? `
+        <div class="replay-section">
+          <h3>Scroll Depth Over Time</h3>
+          <div class="timeline-canvas-wrap">
+            <canvas id="scroll-canvas" width="960" height="200"></canvas>
+          </div>
+        </div>` : ""}
+
+        <div class="replay-section">
+          <h3>Event Timeline</h3>
+          <div class="timeline-canvas-wrap">
+            <canvas id="timeline-canvas" width="960" height="120"></canvas>
+          </div>
+        </div>
+      `;
+
+      // Draw visualizations
+      if (mouseEvents.length) initReplay(mouseEvents);
+      if (clickEvents.length) drawClickHeatmap(clickEvents);
+      if (scrollEvents.length) drawScrollChart(scrollEvents, firstTs);
+      drawTimeline(events, firstTs, lastTs);
+    }
+
+    // --- Mouse trail replay --------------------------------------------------
+
+    function initReplay(mouseEvents) {
+      const canvas = document.getElementById("replay-canvas");
+      const ctx = canvas.getContext("2d");
+
+      // Find bounds
+      let maxX = 0, maxY = 0;
+      mouseEvents.forEach((e) => {
+        if (e.data.x > maxX) maxX = e.data.x;
+        if (e.data.y > maxY) maxY = e.data.y;
+      });
+      maxX = Math.max(maxX, 960);
+      maxY = Math.max(maxY, 540);
+
+      const scaleX = canvas.width / maxX;
+      const scaleY = canvas.height / maxY;
+
+      let playing = false;
+      let idx = 0;
+
+      function drawFrame() {
+        // Trail fading
+        ctx.fillStyle = "rgba(255,255,255,0.03)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const speed = parseInt(document.getElementById("replay-speed").value, 10);
+        const batchSize = Math.max(1, speed);
+
+        for (let i = 0; i < batchSize && idx < mouseEvents.length; i++, idx++) {
+          const e = mouseEvents[idx];
+          const x = e.data.x * scaleX;
+          const y = e.data.y * scaleY;
+
+          // Trail dot
+          ctx.beginPath();
+          ctx.arc(x, y, 3, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(108,124,255,0.8)";
+          ctx.fill();
+
+          // Connection line
+          if (idx > 0) {
+            const prev = mouseEvents[idx - 1];
+            ctx.beginPath();
+            ctx.moveTo(prev.data.x * scaleX, prev.data.y * scaleY);
+            ctx.lineTo(x, y);
+            ctx.strokeStyle = "rgba(108,124,255,0.3)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+        }
+
+        // Progress bar
+        const pct = (idx / mouseEvents.length) * 100;
+        document.getElementById("replay-bar").style.width = pct + "%";
+
+        if (idx < mouseEvents.length && playing) {
+          replayAnimation = requestAnimationFrame(drawFrame);
+        } else {
+          playing = false;
+        }
+      }
+
+      // Clear canvas to white
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      document.getElementById("replay-play").addEventListener("click", () => {
+        if (playing) {
+          playing = false;
+          if (replayAnimation) cancelAnimationFrame(replayAnimation);
+          return;
+        }
+        if (idx >= mouseEvents.length) idx = 0;
+        playing = true;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawFrame();
+      });
+
+      document.getElementById("replay-reset").addEventListener("click", () => {
+        playing = false;
+        if (replayAnimation) cancelAnimationFrame(replayAnimation);
+        idx = 0;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        document.getElementById("replay-bar").style.width = "0%";
+      });
+    }
+
+    // --- Click heatmap -------------------------------------------------------
+
+    function drawClickHeatmap(clickEvents) {
+      const canvas = document.getElementById("click-canvas");
+      const ctx = canvas.getContext("2d");
+
+      let maxX = 0, maxY = 0;
+      clickEvents.forEach((e) => {
+        if (e.data.x > maxX) maxX = e.data.x;
+        if (e.data.y > maxY) maxY = e.data.y;
+      });
+      maxX = Math.max(maxX, 960);
+      maxY = Math.max(maxY, 540);
+
+      const scaleX = canvas.width / maxX;
+      const scaleY = canvas.height / maxY;
+
+      // White background
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw heatmap circles
+      clickEvents.forEach((e) => {
+        const x = e.data.x * scaleX;
+        const y = e.data.y * scaleY;
+
+        const gradient = ctx.createRadialGradient(x, y, 0, x, y, 30);
+        gradient.addColorStop(0, "rgba(248,113,113,0.6)");
+        gradient.addColorStop(1, "rgba(248,113,113,0)");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x - 30, y - 30, 60, 60);
+
+        // Center dot
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(220,38,38,0.9)";
+        ctx.fill();
+      });
+    }
+
+    // --- Scroll depth chart --------------------------------------------------
+
+    function drawScrollChart(scrollEvents, firstTs) {
+      const canvas = document.getElementById("scroll-canvas");
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width, h = canvas.height;
+      const pad = 40;
+
+      ctx.fillStyle = "#1a1d27";
+      ctx.fillRect(0, 0, w, h);
+
+      if (scrollEvents.length < 2) return;
+
+      const totalDuration = scrollEvents[scrollEvents.length - 1].ts - firstTs;
+      if (totalDuration === 0) return;
+
+      // Grid lines
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.lineWidth = 1;
+      for (let p = 0; p <= 100; p += 25) {
+        const y = pad + ((100 - p) / 100) * (h - pad * 2);
+        ctx.beginPath();
+        ctx.moveTo(pad, y);
+        ctx.lineTo(w - 10, y);
+        ctx.stroke();
+
+        ctx.fillStyle = "#8b90a0";
+        ctx.font = "10px monospace";
+        ctx.textAlign = "right";
+        ctx.fillText(p + "%", pad - 5, y + 3);
+      }
+
+      // Draw scroll line
+      ctx.beginPath();
+      ctx.strokeStyle = "#34d399";
+      ctx.lineWidth = 2;
+
+      scrollEvents.forEach((e, i) => {
+        const x = pad + ((e.ts - firstTs) / totalDuration) * (w - pad - 10);
+        const y = pad + ((100 - (e.data.percent || 0)) / 100) * (h - pad * 2);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      // Fill under curve
+      const lastX = pad + ((scrollEvents[scrollEvents.length - 1].ts - firstTs) / totalDuration) * (w - pad - 10);
+      ctx.lineTo(lastX, h - pad);
+      ctx.lineTo(pad, h - pad);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(52,211,153,0.1)";
+      ctx.fill();
+    }
+
+    // --- Event timeline (all types) ------------------------------------------
+
+    function drawTimeline(events, firstTs, lastTs) {
+      const canvas = document.getElementById("timeline-canvas");
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width, h = canvas.height;
+
+      ctx.fillStyle = "#1a1d27";
+      ctx.fillRect(0, 0, w, h);
+
+      if (!events.length || firstTs === lastTs) return;
+
+      const duration = lastTs - firstTs;
+      const typeColors = {
+        mouse: "#818cf8",
+        scroll: "#34d399",
+        idle: "#fbbf24",
+        click: "#f87171",
+        form: "#c084fc",
+        engagement: "#2dd4bf",
+        session: "#fb923c",
+        context: "#94a3b8",
+        cross_session: "#f472b6",
+        goal: "#10b981",
+      };
+
+      const types = Object.keys(typeColors);
+      const rowH = h / types.length;
+
+      // Type labels
+      ctx.font = "10px monospace";
+      ctx.textAlign = "left";
+
+      types.forEach((type, i) => {
+        const y = i * rowH;
+        ctx.fillStyle = typeColors[type];
+        ctx.globalAlpha = 0.15;
+        ctx.fillRect(0, y, w, rowH);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = typeColors[type];
+        ctx.fillText(type, 4, y + rowH / 2 + 3);
+      });
+
+      // Draw event marks
+      events.forEach((e) => {
+        const typeIdx = types.indexOf(e.type);
+        if (typeIdx < 0) return;
+
+        const x = 80 + ((e.ts - firstTs) / duration) * (w - 90);
+        const y = typeIdx * rowH;
+
+        ctx.fillStyle = typeColors[e.type];
+        ctx.globalAlpha = 0.7;
+        ctx.fillRect(x, y + 2, 2, rowH - 4);
+        ctx.globalAlpha = 1;
+      });
+    }
+
+    // --- SSE live feed -------------------------------------------------------
+
+    function connectSSE() {
+      const feed = document.getElementById("live-feed");
+      let hasEvents = false;
+
+      const source = new EventSource(API + "/api/events/live");
+
+      source.onmessage = (event) => {
+        const batch = JSON.parse(event.data);
+        if (!hasEvents) {
+          feed.innerHTML = "";
+          hasEvents = true;
+        }
+
+        trackEventRate(batch.events.length);
+
+        batch.events.forEach((e) => {
+          const entry = document.createElement("div");
+          entry.className = "feed-entry";
+
+          const time = new Date().toLocaleTimeString("en-US", { hour12: false });
+          const shortSession = batch.sessionId.slice(0, 8);
+          const dataStr = JSON.stringify(e.data);
+
+          entry.innerHTML = `
+            <span class="feed-time">${time}</span>
+            <span class="feed-session">${shortSession}</span>
+            <span class="feed-type ${e.type}">${e.type}</span>
+            <span class="feed-data">${dataStr}</span>
+          `;
+
+          feed.prepend(entry);
+
+          // Keep max 500 entries
+          while (feed.children.length > 500) feed.lastChild.remove();
+        });
+
+        // Refresh session list periodically
+        loadSessions();
+      };
+
+      source.onerror = () => {
+        setTimeout(connectSSE, 3000);
+        source.close();
+      };
+    }
+
+    // --- Refresh button ------------------------------------------------------
+
+    document.getElementById("refresh-btn").addEventListener("click", loadSessions);
+
+    // --- Init ----------------------------------------------------------------
+
+    loadSessions();
+    connectSSE();
+  </script>
+</body>
+</html>

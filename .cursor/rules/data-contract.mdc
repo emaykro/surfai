@@ -1,0 +1,38 @@
+---
+description: Event schema contract shared by SDK and backend
+globs: "{client/**/*.ts,server/**/*.js,server/**/*.ts}"
+alwaysApply: false
+---
+
+# Event Data Contract
+
+- Treat this file as the single source of truth for the ingest payload shared by SDK and backend.
+- Every batch payload must be JSON with this exact top-level shape:
+
+```json
+{"sessionId":"uuid","sentAt":1710000000000,"events":[{"type":"mouse","data":{"x":12,"y":48,"ts":1710000000000}}]}
+```
+
+- Required top-level fields:
+  - `sessionId`: non-empty string identifying one browser session.
+  - `sentAt`: integer unix timestamp in milliseconds, created on the client.
+  - `events`: non-empty array of event objects.
+- Allowed event types: `mouse`, `scroll`, `idle`, `click`, `form`, `engagement`, `session`, `context`, `cross_session`, `goal`.
+- Core event shapes:
+  - `mouse` -> `{x, y, ts}`
+  - `scroll` -> `{percent, ts}`
+  - `idle` -> `{idleMs, ts}`
+- Phase 2 event shapes:
+  - `click` -> `{x, y, elType, elTagHash, isCta, isExternal, timeSinceStart, ts}`
+  - `form` -> `{action, formHash, fieldIndex, fieldType, fillDurationMs, ts}`
+  - `engagement` -> `{activeMs, idleMs, maxScrollPercent, scrollSpeed, microScrolls, readthrough, ts}`
+  - `session` -> `{pageCount, avgNavSpeedMs, isBounce, isHyperEngaged, timeBucket, ts}`
+  - `context` -> `{trafficSource, deviceType, browser, os, screenW, screenH, language, connectionType, ts}`
+  - `cross_session` -> `{visitorId, visitNumber, returnWithin24h, returnWithin7d, ts}`
+- Phase 5 (Goal) event shape:
+  - `goal` -> `{goalId, value?, metadata?, ts}` — conversion event; deduped within 5s per goalId+session
+- All numeric fields must be numbers, never strings.
+- `percent` / `maxScrollPercent` must stay in `0..100`.
+- Element selectors and text are hashed with MurmurHash3 (truncated to 120 chars) — never raw strings.
+- Do not rename fields, add optional fields, or introduce new event types without updating both SDK types and backend schema in the same change.
+- Backend code must reject payloads that do not match this contract with a validation error; never coerce malformed input into the contract.

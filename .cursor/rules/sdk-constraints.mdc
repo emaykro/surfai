@@ -1,0 +1,28 @@
+---
+description: SDK runtime and safety constraints for tracker code
+globs: "client/**/*.ts"
+alwaysApply: false
+---
+
+# SDK Constraints
+
+- Keep the client tracker zero-dependency: no runtime packages, analytics SDKs, polyfill bundles, or heavy helpers.
+- Never block the host page. Network delivery must stay asynchronous and use `fetch(..., { keepalive: true })` or `navigator.sendBeacon(...)`; never use synchronous XHR.
+- Preserve the security gate: input-originated events must be ignored via `isInputElement()` or an equivalent stricter check.
+- Do not capture text values, element contents, form field state, or anything that could expose sensitive user input.
+- Keep listeners lightweight and use throttling or sampling for high-frequency events such as `mousemove`.
+- Enforce a hard batch ceiling before send:
+  - max `100` events per batch
+  - max `64KB` serialized payload size
+- If delivery fails, the SDK must fail silently and must not throw into the host application.
+- `start()` and `stop()` must remain idempotent enough to avoid duplicate listeners or runaway timers.
+- Avoid long synchronous work inside event handlers, timers, or flush logic.
+- Any contract change in the SDK must be mirrored in the backend validation schema in the same change.
+
+## Goal & Conversion API (Phase 5)
+
+- `surfai.goal(goalId, metadata?)` — fires a `goal` event. Deduplicated: same goalId within 5s window is silently dropped.
+- `TrackerOptions.pageGoals` — array of `{goalId, urlPattern, matchType}` rules. Auto-fires goals on URL match. SPA-aware (patches `pushState`/`replaceState`, listens `popstate`).
+- `TrackerOptions.dataLayerCapture` (default `false`) — intercepts `window.dataLayer.push()` and maps configured events to SURFAI goals.
+- `TrackerOptions.dataLayerMappings` — custom event→goalId mappings, merged with defaults (`purchase`, `generate_lead`, `sign_up`, `form_submit`).
+- `stop()` must restore original `dataLayer.push` and remove navigation listeners.

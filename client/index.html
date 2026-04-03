@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SURFAI SDK — E2E Test</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #1a1a2e;
+      background: #f0f0f5;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+
+    h1 { font-size: 1.8rem; margin-bottom: .5rem; }
+    h2 { font-size: 1.2rem; color: #555; margin-bottom: 1.5rem; font-weight: 400; }
+    h3 { margin-bottom: .75rem; font-size: 1rem; }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+    @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    button {
+      padding: .6rem 1.4rem;
+      border: none;
+      border-radius: 8px;
+      font-size: .9rem;
+      cursor: pointer;
+      margin-right: .5rem;
+      margin-bottom: .5rem;
+      transition: transform .1s, box-shadow .2s;
+    }
+    button:active { transform: scale(.97); }
+
+    .btn-primary { background: #4361ee; color: #fff; }
+    .btn-secondary { background: #e0e0e0; color: #333; }
+    .btn-accent { background: #f72585; color: #fff; }
+    .btn-success { background: #06d6a0; color: #fff; }
+    .btn-warning { background: #ffd166; color: #333; }
+    .btn-cta {
+      background: linear-gradient(135deg, #f72585, #7209b7);
+      color: #fff;
+      font-size: 1.1rem;
+      padding: .9rem 2.2rem;
+      border-radius: 10px;
+      box-shadow: 0 4px 16px rgba(247,37,133,.3);
+    }
+    .btn-cta:hover { box-shadow: 0 6px 24px rgba(247,37,133,.45); }
+    .btn-outline {
+      background: transparent;
+      border: 2px solid #4361ee;
+      color: #4361ee;
+    }
+    .btn-sm { padding: .4rem 1rem; font-size: .8rem; }
+
+    label { display: block; font-size: .85rem; color: #666; margin-bottom: .4rem; }
+
+    input, textarea, select {
+      width: 100%;
+      padding: .6rem .8rem;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: .9rem;
+      margin-bottom: .75rem;
+      font-family: inherit;
+    }
+    select { appearance: auto; }
+    textarea { min-height: 80px; resize: vertical; }
+
+    .spacer {
+      height: 1200px;
+      background: linear-gradient(180deg, #f0f0f5 0%, #d4d4e0 100%);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #888;
+      font-size: 1.1rem;
+    }
+
+    #log {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: .78rem;
+      background: #1a1a2e;
+      color: #7fefbd;
+      padding: 1rem;
+      border-radius: 8px;
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: .15rem .5rem;
+      border-radius: 20px;
+      font-size: .7rem;
+      font-weight: 600;
+      margin-left: .5rem;
+      vertical-align: middle;
+    }
+    .badge-ok { background: #d4edda; color: #155724; }
+    .badge-warn { background: #fff3cd; color: #856404; }
+    .badge-goal { background: #e8daef; color: #6c3483; }
+
+    /* Pricing table */
+    .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    @media (max-width: 768px) { .pricing-grid { grid-template-columns: 1fr; } }
+    .pricing-card {
+      border: 2px solid #e0e0e0;
+      border-radius: 12px;
+      padding: 1.2rem;
+      text-align: center;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .pricing-card.featured { border-color: #4361ee; box-shadow: 0 4px 20px rgba(67,97,238,.15); }
+    .pricing-card h4 { font-size: 1rem; margin-bottom: .3rem; }
+    .pricing-card .price { font-size: 1.8rem; font-weight: 700; margin: .5rem 0; }
+    .pricing-card .price span { font-size: .85rem; font-weight: 400; color: #888; }
+    .pricing-card ul { list-style: none; text-align: left; margin: .8rem 0; font-size: .85rem; }
+    .pricing-card ul li { padding: .2rem 0; }
+    .pricing-card ul li::before { content: "✓ "; color: #06d6a0; font-weight: 700; }
+
+    /* Thank-you overlay */
+    .overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+    .overlay.active { display: flex; }
+    .overlay-content {
+      background: #fff;
+      border-radius: 16px;
+      padding: 2.5rem;
+      max-width: 480px;
+      text-align: center;
+      box-shadow: 0 12px 40px rgba(0,0,0,.2);
+      animation: popIn .3s ease;
+    }
+    @keyframes popIn { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .overlay-content h2 { font-size: 1.5rem; margin-bottom: .5rem; color: #06d6a0; }
+    .overlay-content p { color: #555; margin-bottom: 1.2rem; }
+    .overlay-content .check-icon { font-size: 3rem; margin-bottom: .8rem; }
+
+    /* Newsletter bar */
+    .newsletter-bar {
+      display: flex;
+      gap: .5rem;
+      align-items: center;
+    }
+    .newsletter-bar input { margin-bottom: 0; flex: 1; }
+    .newsletter-bar button { margin-bottom: 0; white-space: nowrap; }
+
+    /* Product card */
+    .product-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    @media (max-width: 768px) { .product-grid { grid-template-columns: 1fr; } }
+    .product-item {
+      border: 1px solid #e8e8e8;
+      border-radius: 10px;
+      padding: 1rem;
+      text-align: center;
+    }
+    .product-item .product-img {
+      width: 100%;
+      height: 100px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      border-radius: 8px;
+      margin-bottom: .8rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: .85rem;
+    }
+    .product-item .product-price { font-weight: 700; font-size: 1.1rem; margin: .3rem 0; }
+
+    /* Chat widget */
+    .chat-fab {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: #4361ee;
+      color: #fff;
+      border: none;
+      font-size: 1.5rem;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(67,97,238,.4);
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .chat-popup {
+      display: none;
+      position: fixed;
+      bottom: 6rem;
+      right: 2rem;
+      width: 320px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.15);
+      z-index: 999;
+      overflow: hidden;
+    }
+    .chat-popup.active { display: block; }
+    .chat-popup-header {
+      background: #4361ee;
+      color: #fff;
+      padding: .8rem 1rem;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .chat-popup-body { padding: 1rem; }
+    .chat-popup-body input { margin-bottom: .5rem; }
+
+    /* Section headers */
+    .section-title {
+      font-size: .75rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: #999;
+      margin-bottom: .5rem;
+    }
+
+    /* Conversion flash */
+    .goal-flash {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      background: #6c3483;
+      color: #fff;
+      padding: .6rem 1.2rem;
+      border-radius: 8px;
+      font-size: .85rem;
+      z-index: 2000;
+      animation: flashIn .3s ease, flashOut .3s ease 2.5s forwards;
+      box-shadow: 0 4px 16px rgba(108,52,131,.4);
+    }
+    @keyframes flashIn { from { transform: translateX(120%); } to { transform: translateX(0); } }
+    @keyframes flashOut { from { opacity: 1; } to { opacity: 0; } }
+  </style>
+</head>
+<body>
+
+  <h1>SURFAI SDK Test Page</h1>
+  <h2>Interact with the page to generate events and fire conversion goals.</h2>
+
+  <!-- ================================================================== -->
+  <!-- 1. Interactive Elements (mouse/click tracking) -->
+  <!-- ================================================================== -->
+  <div class="card">
+    <h3>Interactive Elements <span class="badge badge-ok">tracked</span></h3>
+    <button class="btn-primary">Primary Action</button>
+    <button class="btn-secondary">Secondary</button>
+    <button class="btn-accent">Accent Button</button>
+    <p style="margin-top:.75rem; font-size:.85rem; color:#666;">
+      Mouse movement over these buttons generates <code>mouse</code> events.
+      Clicking resets the idle timer.
+    </p>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- 2. Hero CTA — main page conversion -->
+  <!-- ================================================================== -->
+  <div class="card" style="text-align:center; padding:2.5rem;">
+    <h3 style="font-size:1.3rem; margin-bottom:.3rem;">Ready to understand your users?</h3>
+    <p style="color:#666; margin-bottom:1.2rem;">Start your free 14-day trial. No credit card required.</p>
+    <button class="btn-cta" id="hero-cta">Start Free Trial</button>
+    <span class="badge badge-goal">goal: hero_cta_click</span>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- 3. Lead Capture / Contact Form -->
+  <!-- ================================================================== -->
+  <div class="grid-2">
+    <div class="card">
+      <h3>Contact Us <span class="badge badge-goal">goal: contact_form_submit</span></h3>
+      <form id="contact-form">
+        <label for="contact-name">Name</label>
+        <input id="contact-name" type="text" placeholder="John Doe">
+        <label for="contact-email">Email</label>
+        <input id="contact-email" type="email" placeholder="john@example.com">
+        <label for="contact-subject">Subject</label>
+        <select id="contact-subject">
+          <option value="">Select a topic...</option>
+          <option value="demo">Request a Demo</option>
+          <option value="pricing">Pricing Question</option>
+          <option value="support">Technical Support</option>
+          <option value="other">Other</option>
+        </select>
+        <label for="contact-message">Message</label>
+        <textarea id="contact-message" placeholder="Tell us how we can help..."></textarea>
+        <button type="submit" class="btn-primary">Send Message</button>
+      </form>
+    </div>
+
+    <!-- 4. Sign-up / Registration Form -->
+    <div class="card">
+      <h3>Create Account <span class="badge badge-goal">goal: signup_submit</span></h3>
+      <form id="signup-form">
+        <label for="signup-email">Email</label>
+        <input id="signup-email" type="email" placeholder="you@company.com">
+        <label for="signup-password">Password</label>
+        <input id="signup-password" type="password" placeholder="Min 8 characters">
+        <label for="signup-company">Company</label>
+        <input id="signup-company" type="text" placeholder="Acme Corp">
+        <label for="signup-role">Role</label>
+        <select id="signup-role">
+          <option value="">Select your role...</option>
+          <option value="marketer">Marketer</option>
+          <option value="product">Product Manager</option>
+          <option value="developer">Developer</option>
+          <option value="founder">Founder / CEO</option>
+          <option value="other">Other</option>
+        </select>
+        <label style="display:flex; align-items:center; gap:.5rem; margin-bottom:.75rem;">
+          <input type="checkbox" id="signup-terms" style="width:auto; margin:0;">
+          <span>I agree to the Terms of Service</span>
+        </label>
+        <button type="submit" class="btn-success" style="width:100%;">Create Free Account</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- 5. Newsletter Subscription -->
+  <!-- ================================================================== -->
+  <div class="card">
+    <h3>Subscribe to Newsletter <span class="badge badge-goal">goal: newsletter_subscribe</span></h3>
+    <p style="font-size:.85rem; color:#666; margin-bottom:.8rem;">Get weekly insights on user behavior analytics.</p>
+    <form id="newsletter-form" class="newsletter-bar">
+      <input type="email" placeholder="Enter your email" id="newsletter-email">
+      <button type="submit" class="btn-primary">Subscribe</button>
+    </form>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- 6. Pricing Table — plan selection -->
+  <!-- ================================================================== -->
+  <div class="card">
+    <h3>Pricing Plans <span class="badge badge-goal">goal: plan_selected</span></h3>
+    <div class="pricing-grid">
+      <div class="pricing-card">
+        <h4>Starter</h4>
+        <div class="price">$0<span>/mo</span></div>
+        <ul>
+          <li>1,000 sessions/mo</li>
+          <li>7-day retention</li>
+          <li>Basic analytics</li>
+        </ul>
+        <button class="btn-outline btn-sm" data-plan="starter">Get Started</button>
+      </div>
+      <div class="pricing-card featured">
+        <h4>Pro</h4>
+        <div class="price">$49<span>/mo</span></div>
+        <ul>
+          <li>50,000 sessions/mo</li>
+          <li>90-day retention</li>
+          <li>ML predictions</li>
+          <li>Priority support</li>
+        </ul>
+        <button class="btn-primary btn-sm" data-plan="pro">Choose Pro</button>
+      </div>
+      <div class="pricing-card">
+        <h4>Enterprise</h4>
+        <div class="price">Custom</div>
+        <ul>
+          <li>Unlimited sessions</li>
+          <li>1-year retention</li>
+          <li>Dedicated support</li>
+          <li>Custom integrations</li>
+        </ul>
+        <button class="btn-secondary btn-sm" data-plan="enterprise">Contact Sales</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- 7. Product Catalog — Add to Cart -->
+  <!-- ================================================================== -->
+  <div class="card">
+    <h3>Products <span class="badge badge-goal">goal: add_to_cart</span></h3>
+    <div class="product-grid">
+      <div class="product-item">
+        <div class="product-img">Analytics SDK</div>
+        <div class="product-price">$29</div>
+        <p style="font-size:.8rem; color:#888; margin-bottom:.5rem;">Behavioral tracking library</p>
+        <button class="btn-success btn-sm add-to-cart" data-product="sdk" data-price="29">Add to Cart</button>
+      </div>
+      <div class="product-item">
+        <div class="product-img">Dashboard Pro</div>
+        <div class="product-price">$99</div>
+        <p style="font-size:.8rem; color:#888; margin-bottom:.5rem;">Advanced analytics dashboard</p>
+        <button class="btn-success btn-sm add-to-cart" data-product="dashboard" data-price="99">Add to Cart</button>
+      </div>
+      <div class="product-item">
+        <div class="product-img">ML Engine</div>
+        <div class="product-price">$199</div>
+        <p style="font-size:.8rem; color:#888; margin-bottom:.5rem;">Prediction & scoring engine</p>
+        <button class="btn-success btn-sm add-to-cart" data-product="ml-engine" data-price="199">Add to Cart</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- 8. Demo Request / Book a Call -->
+  <!-- ================================================================== -->
+  <div class="card" style="text-align:center; padding:2rem;">
+    <h3>Want a personalized demo? <span class="badge badge-goal">goal: demo_request</span></h3>
+    <p style="color:#666; margin-bottom:1rem;">See SURFAI in action with your own data.</p>
+    <button class="btn-accent" id="demo-btn" style="font-size:1rem; padding:.8rem 2rem;">Book a Demo</button>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- 9. File Download (lead magnet) -->
+  <!-- ================================================================== -->
+  <div class="card">
+    <h3>Free Resources <span class="badge badge-goal">goal: resource_download</span></h3>
+    <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+      <button class="btn-outline download-btn" data-resource="whitepaper">Download Whitepaper (PDF)</button>
+      <button class="btn-outline download-btn" data-resource="case-study">Download Case Study</button>
+      <button class="btn-outline download-btn" data-resource="api-docs">Download API Docs</button>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- 10. Social Share -->
+  <!-- ================================================================== -->
+  <div class="card">
+    <h3>Share <span class="badge badge-goal">goal: social_share</span></h3>
+    <div style="display:flex; gap:.5rem;">
+      <button class="btn-primary btn-sm social-btn" data-platform="twitter" style="background:#1da1f2;">Twitter</button>
+      <button class="btn-primary btn-sm social-btn" data-platform="linkedin" style="background:#0077b5;">LinkedIn</button>
+      <button class="btn-primary btn-sm social-btn" data-platform="facebook" style="background:#1877f2;">Facebook</button>
+      <button class="btn-secondary btn-sm social-btn" data-platform="copy-link">Copy Link</button>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- 11. Video Play -->
+  <!-- ================================================================== -->
+  <div class="card">
+    <h3>Product Video <span class="badge badge-goal">goal: video_play</span></h3>
+    <div id="video-placeholder" style="background:#1a1a2e; border-radius:10px; height:200px; display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative;">
+      <div style="width:60px; height:60px; border-radius:50%; background:rgba(255,255,255,.2); display:flex; align-items:center; justify-content:center;">
+        <div style="width:0; height:0; border-left:20px solid #fff; border-top:12px solid transparent; border-bottom:12px solid transparent; margin-left:4px;"></div>
+      </div>
+      <span style="position:absolute; bottom:1rem; right:1rem; color:#888; font-size:.8rem;">2:34</span>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- Input Fields (security test — SDK ignores these) -->
+  <!-- ================================================================== -->
+  <div class="card">
+    <h3>Input Fields <span class="badge badge-warn">ignored by SDK</span></h3>
+    <label for="name">Text input (events skipped — security rule)</label>
+    <input id="name" type="text" placeholder="Type anything here — mouse events over this field are dropped">
+
+    <label for="notes">Textarea (also ignored)</label>
+    <textarea id="notes" placeholder="This textarea is also excluded from tracking to prevent PII capture"></textarea>
+
+    <div contenteditable="true" style="border:1px dashed #ccc; padding:.6rem; border-radius:8px; font-size:.85rem; color:#999; min-height:40px;">
+      contenteditable div — also ignored
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- Live Event Log -->
+  <!-- ================================================================== -->
+  <div class="card">
+    <h3>Live Event Log</h3>
+    <div id="log">Waiting for events...</div>
+  </div>
+
+  <!-- Tall spacer to enable scroll events -->
+  <div class="spacer">↓ Scroll down to generate scroll events ↓</div>
+
+  <!-- ================================================================== -->
+  <!-- Thank-you Overlay -->
+  <!-- ================================================================== -->
+  <div class="overlay" id="thank-you-overlay">
+    <div class="overlay-content">
+      <div class="check-icon">&#10003;</div>
+      <h2 id="thank-you-title">Thank you!</h2>
+      <p id="thank-you-message">Your submission has been received. We'll be in touch shortly.</p>
+      <button class="btn-primary" id="thank-you-close">Close</button>
+    </div>
+  </div>
+
+  <!-- Chat Widget FAB -->
+  <button class="chat-fab" id="chat-fab" title="Chat with us">&#128172;</button>
+  <div class="chat-popup" id="chat-popup">
+    <div class="chat-popup-header">
+      <span>Chat with us</span>
+      <button style="background:none; border:none; color:#fff; cursor:pointer; font-size:1.2rem;" id="chat-close">&times;</button>
+    </div>
+    <div class="chat-popup-body">
+      <p style="font-size:.85rem; color:#666; margin-bottom:.8rem;">Hi! How can we help you today?</p>
+      <input type="text" placeholder="Type your message..." id="chat-input">
+      <button class="btn-primary btn-sm" id="chat-send" style="width:100%;">Send</button>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- Script -->
+  <!-- ================================================================== -->
+  <script type="module">
+    import { SurfaiTracker } from "./dist/tracker.js";
+    import {
+      ClickCollector,
+      FormCollector,
+      EngagementCollector,
+      SessionCollector,
+      ContextCollector,
+      CrossSessionCollector,
+    } from "./dist/collectors/index.js";
+
+    // --- Event Log (fetch interceptor) ------------------------------------
+    const logEl = document.getElementById("log");
+    let lineCount = 0;
+
+    const origFetch = window.fetch;
+    window.fetch = async function patchedFetch(url, opts) {
+      if (typeof url === "string" && url.includes("/api/events") && opts?.body) {
+        try {
+          const payload = JSON.parse(opts.body);
+          const types = payload.events.map((e) => e.type);
+          const summary = {};
+          types.forEach((t) => (summary[t] = (summary[t] || 0) + 1));
+          const parts = Object.entries(summary).map(([k, v]) => `${k}*${v}`);
+          lineCount++;
+          logEl.textContent =
+            `[${new Date().toLocaleTimeString()}] flush #${lineCount}  ${parts.join("  ")}  session=${payload.sessionId.slice(0, 8)}...\n` +
+            logEl.textContent;
+        } catch { /* noop */ }
+      }
+      return origFetch.apply(this, arguments);
+    };
+
+    // --- Tracker Init -----------------------------------------------------
+    const tracker = new SurfaiTracker({
+      endpoint: "/api/events",
+      flushInterval: 3000,
+      pageGoals: [
+        { goalId: "page_thank_you", urlPattern: "/thank-you", matchType: "contains" },
+      ],
+    });
+
+    tracker.addCollector(new ClickCollector(tracker));
+    tracker.addCollector(new FormCollector(tracker));
+    tracker.addCollector(new EngagementCollector(tracker));
+    tracker.addCollector(new SessionCollector(tracker));
+    tracker.addCollector(new ContextCollector(tracker));
+    tracker.addCollector(new CrossSessionCollector(tracker));
+
+    tracker.start();
+    window.addEventListener("beforeunload", () => tracker.stop());
+
+    logEl.textContent = "SDK started. Move mouse or scroll to see events.\n";
+
+    // --- Goal flash notification ------------------------------------------
+    function flashGoal(goalId) {
+      const el = document.createElement("div");
+      el.className = "goal-flash";
+      el.textContent = `Goal fired: ${goalId}`;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 3000);
+    }
+
+    // --- Thank-you overlay ------------------------------------------------
+    const overlay = document.getElementById("thank-you-overlay");
+    const thankTitle = document.getElementById("thank-you-title");
+    const thankMsg = document.getElementById("thank-you-message");
+
+    function showThankYou(title, message) {
+      thankTitle.textContent = title;
+      thankMsg.textContent = message;
+      overlay.classList.add("active");
+    }
+
+    document.getElementById("thank-you-close").addEventListener("click", () => {
+      overlay.classList.remove("active");
+    });
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) overlay.classList.remove("active");
+    });
+
+    // --- 1. Hero CTA ------------------------------------------------------
+    document.getElementById("hero-cta").addEventListener("click", () => {
+      tracker.goal("hero_cta_click");
+      flashGoal("hero_cta_click");
+      showThankYou("Trial Activated!", "Your 14-day free trial has started. Check your email for login details.");
+    });
+
+    // --- 2. Contact Form --------------------------------------------------
+    document.getElementById("contact-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const subject = document.getElementById("contact-subject").value;
+      tracker.goal("contact_form_submit", { subject: subject || "none" });
+      flashGoal("contact_form_submit");
+      showThankYou("Message Sent!", "Thank you for reaching out. Our team will respond within 24 hours.");
+      e.target.reset();
+    });
+
+    // --- 3. Signup Form ---------------------------------------------------
+    document.getElementById("signup-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const role = document.getElementById("signup-role").value;
+      tracker.goal("signup_submit", { role: role || "unknown" });
+      flashGoal("signup_submit");
+      showThankYou("Account Created!", "Welcome aboard! Check your email to verify your account.");
+      e.target.reset();
+    });
+
+    // --- 4. Newsletter ----------------------------------------------------
+    document.getElementById("newsletter-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      tracker.goal("newsletter_subscribe");
+      flashGoal("newsletter_subscribe");
+      showThankYou("Subscribed!", "You're on the list. Expect your first email this week.");
+      e.target.reset();
+    });
+
+    // --- 5. Pricing Plan --------------------------------------------------
+    document.querySelectorAll("[data-plan]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const plan = btn.dataset.plan;
+        tracker.goal("plan_selected", { plan });
+        flashGoal(`plan_selected (${plan})`);
+        showThankYou("Great Choice!", `You selected the ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan. Proceeding to checkout...`);
+      });
+    });
+
+    // --- 6. Add to Cart ---------------------------------------------------
+    document.querySelectorAll(".add-to-cart").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const product = btn.dataset.product;
+        const price = Number(btn.dataset.price);
+        tracker.goal("add_to_cart", { product, price });
+        flashGoal(`add_to_cart (${product})`);
+        btn.textContent = "Added!";
+        btn.disabled = true;
+        setTimeout(() => { btn.textContent = "Add to Cart"; btn.disabled = false; }, 2000);
+      });
+    });
+
+    // --- 7. Demo Request --------------------------------------------------
+    document.getElementById("demo-btn").addEventListener("click", () => {
+      tracker.goal("demo_request");
+      flashGoal("demo_request");
+      showThankYou("Demo Booked!", "We'll send you a calendar invite shortly. Looking forward to showing you SURFAI!");
+    });
+
+    // --- 8. Resource Download ---------------------------------------------
+    document.querySelectorAll(".download-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const resource = btn.dataset.resource;
+        tracker.goal("resource_download", { resource });
+        flashGoal(`resource_download (${resource})`);
+        btn.textContent = "Downloading...";
+        setTimeout(() => { btn.textContent = btn.textContent.replace("Downloading...", "Downloaded!"); }, 1500);
+      });
+    });
+
+    // --- 9. Social Share --------------------------------------------------
+    document.querySelectorAll(".social-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const platform = btn.dataset.platform;
+        tracker.goal("social_share", { platform });
+        flashGoal(`social_share (${platform})`);
+      });
+    });
+
+    // --- 10. Video Play ---------------------------------------------------
+    const videoEl = document.getElementById("video-placeholder");
+    let videoPlaying = false;
+    videoEl.addEventListener("click", () => {
+      if (!videoPlaying) {
+        tracker.goal("video_play");
+        flashGoal("video_play");
+        videoPlaying = true;
+        videoEl.innerHTML = '<div style="color:#fff; font-size:1rem;">Playing...</div>';
+        // Simulate video completion after 5s
+        setTimeout(() => {
+          tracker.goal("video_complete");
+          flashGoal("video_complete");
+          videoEl.innerHTML = '<div style="color:#06d6a0; font-size:1rem;">Video Complete! (click to replay)</div>';
+          videoPlaying = false;
+        }, 5000);
+      }
+    });
+
+    // --- 11. Chat Widget --------------------------------------------------
+    const chatFab = document.getElementById("chat-fab");
+    const chatPopup = document.getElementById("chat-popup");
+    let chatOpened = false;
+
+    chatFab.addEventListener("click", () => {
+      chatPopup.classList.toggle("active");
+      if (!chatOpened) {
+        tracker.goal("chat_opened");
+        flashGoal("chat_opened");
+        chatOpened = true;
+      }
+    });
+
+    document.getElementById("chat-close").addEventListener("click", () => {
+      chatPopup.classList.remove("active");
+    });
+
+    document.getElementById("chat-send").addEventListener("click", () => {
+      const input = document.getElementById("chat-input");
+      if (input.value.trim()) {
+        tracker.goal("chat_message_sent");
+        flashGoal("chat_message_sent");
+        input.value = "";
+        showThankYou("Message Received!", "An agent will reply shortly. Check your email for the conversation transcript.");
+        chatPopup.classList.remove("active");
+      }
+    });
+
+    // --- 12. Scroll Depth Goals -------------------------------------------
+    let scrollGoals = { 25: false, 50: false, 75: false, 100: false };
+    window.addEventListener("scroll", () => {
+      const pct = Math.round((window.scrollY / (document.body.scrollHeight - window.innerHeight)) * 100);
+      for (const threshold of [25, 50, 75, 100]) {
+        if (pct >= threshold && !scrollGoals[threshold]) {
+          scrollGoals[threshold] = true;
+          tracker.goal("scroll_depth", { depth: threshold });
+          flashGoal(`scroll_depth (${threshold}%)`);
+        }
+      }
+    }, { passive: true });
+  </script>
+
+</body>
+</html>

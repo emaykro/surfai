@@ -22,17 +22,13 @@ const STATIC_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:3000")
 const siteCache = new Map();
 const SITE_CACHE_TTL_MS = 60_000; // 60 seconds
 
-/** @type {{origins: Set<string>, cachedAt: number} | null} */
-let allOriginsCache = null;
-
 /**
- * Build a Set of all allowed origins: static (ENV) + all sites' allowed_origins from DB.
- * Cached for 60s to avoid DB hit on every preflight.
+ * Dynamic CORS origins — loaded from DB on startup and refreshed every 60s.
+ * @type {Set<string>}
  */
-async function getAllAllowedOrigins() {
-  if (allOriginsCache && Date.now() - allOriginsCache.cachedAt < SITE_CACHE_TTL_MS) {
-    return allOriginsCache.origins;
-  }
+let dynamicOrigins = new Set(STATIC_ORIGINS);
+
+async function refreshCorsOrigins() {
   const origins = new Set(STATIC_ORIGINS);
   try {
     const { rows } = await pool.query("SELECT allowed_origins, domain FROM sites");
@@ -40,7 +36,6 @@ async function getAllAllowedOrigins() {
       if (row.allowed_origins) {
         for (const o of row.allowed_origins) origins.add(o);
       }
-      // Also allow https://domain and https://www.domain as convenience
       if (row.domain) {
         origins.add(`https://${row.domain}`);
         origins.add(`https://www.${row.domain}`);
@@ -49,11 +44,14 @@ async function getAllAllowedOrigins() {
       }
     }
   } catch {
-    // DB not ready yet — fall back to static origins only
+    // DB not ready yet — keep static origins
   }
-  allOriginsCache = { origins, cachedAt: Date.now() };
-  return origins;
+  dynamicOrigins = origins;
 }
+
+// Load origins on startup, then refresh every 60s
+refreshCorsOrigins();
+setInterval(refreshCorsOrigins, SITE_CACHE_TTL_MS);
 
 async function resolveSiteKey(siteKey) {
   const cached = siteCache.get(siteKey);
@@ -75,10 +73,10 @@ async function resolveSiteKey(siteKey) {
   return entry;
 }
 
-/** Invalidate all caches (called when sites are created/updated) */
+/** Invalidate caches (called when sites are created/updated) */
 function invalidateSiteCache(siteKey) {
   if (siteKey) siteCache.delete(siteKey);
-  allOriginsCache = null; // Force CORS reload
+  refreshCorsOrigins(); // Reload CORS immediately
 }
 
 /** Default project/site for requests without siteKey */
@@ -86,11 +84,10 @@ const DEFAULT_PROJECT_ID = "default";
 const DEFAULT_SITE_ID = "default";
 
 fastify.register(require("@fastify/cors"), {
-  origin: async (origin, callback) => {
+  origin: (origin, callback) => {
     // Allow requests with no origin (curl, server-to-server)
     if (!origin) return callback(null, true);
-    const allowed = await getAllAllowedOrigins();
-    if (allowed.has(origin)) return callback(null, true);
+    if (dynamicOrigins.has(origin)) return callback(null, true);
     callback(null, false);
   },
 });

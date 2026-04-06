@@ -1036,6 +1036,19 @@ async function persistBatch(sessionId, sentAt, events, projectId, siteId) {
       if (event.type === "goal") {
         await persistGoalConversion(client, sessionId, event.data, projectId);
       }
+
+      // Messenger click → auto-conversion
+      if (event.type === "click" && event.data.hrefHost) {
+        const MESSENGER_HOSTS = ["wa.me", "api.whatsapp.com", "t.me", "vk.me", "m.me", "viber.click"];
+        const host = event.data.hrefHost.replace(/^www\./, "");
+        if (MESSENGER_HOSTS.includes(host)) {
+          await persistGoalConversion(client, sessionId, {
+            goalId: "messenger_click",
+            ts: event.data.ts,
+            metadata: { host },
+          }, projectId);
+        }
+      }
     }
 
     await client.query("COMMIT");

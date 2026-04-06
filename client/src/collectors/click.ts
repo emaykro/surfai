@@ -6,6 +6,7 @@ import {
   roundCoord,
   classifyElement,
   isExternalLink,
+  externalLinkHost,
   isCta,
   now,
 } from "../helpers.js";
@@ -38,6 +39,8 @@ export class ClickCollector implements Collector {
 
     this.tracker.markActivity();
 
+    const hrefHost = externalLinkHost(target);
+
     this.tracker.pushEvent({
       type: "click",
       data: {
@@ -47,6 +50,7 @@ export class ClickCollector implements Collector {
         elTagHash: hashSelector(target),
         isCta: isCta(target),
         isExternal: isExternalLink(target),
+        ...(hrefHost ? { hrefHost } : {}),
         timeSinceStart: this.tracker.elapsed,
         ts: now(),
       },

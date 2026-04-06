@@ -75,6 +75,19 @@ export function isExternalLink(el: Element): boolean {
   }
 }
 
+/** Return the hostname of an external link, or null if same-origin / not a link. */
+export function externalLinkHost(el: Element): string | null {
+  if (el.tagName !== "A") return null;
+  const href = (el as HTMLAnchorElement).href;
+  if (!href) return null;
+  try {
+    const url = new URL(href, window.location.origin);
+    return url.origin !== window.location.origin ? url.hostname : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Check if element looks like a CTA (button, submit, or link with CTA-like text). */
 export function isCta(el: Element): boolean {
   const tag = el.tagName;

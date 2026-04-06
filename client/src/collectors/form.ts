@@ -85,16 +85,24 @@ export class FormCollector implements Collector {
 
     this.activeForms.delete(form);
 
+    const formHash = hashSelector(form);
+
     this.tracker.pushEvent({
       type: "form",
       data: {
         action: "submit",
-        formHash: hashSelector(form),
+        formHash,
         fieldIndex: 0,
         fieldType: "",
         fillDurationMs: 0,
         ts: now(),
       },
+    });
+
+    // Auto-fire a goal on every form submit
+    this.tracker.goal("form_submit", {
+      source: "form_collector",
+      formHash: String(formHash),
     });
   };
 

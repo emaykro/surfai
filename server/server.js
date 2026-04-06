@@ -749,7 +749,7 @@ fastify.get("/api/sites/:siteId/snippet", { preHandler: [requireOperatorAuth] },
     ? `,\n        pageGoals: ${JSON.stringify(pageGoals)}`
     : "";
 
-  const extraOpts = `${pageGoalsStr},\n        metrikaCapture: true`;
+  const extraOpts = `${pageGoalsStr},\n        metrikaCapture: true,\n        dataLayerCapture: true`;
 
   const directScript = `<script src="${apiBase}/dist/tracker.js"><\/script>
 <script>

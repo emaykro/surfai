@@ -27,6 +27,8 @@ export class SurfaiTracker {
   private siteKey: string | undefined;
 
   private lastMouseSend = 0;
+  private lastScrollSend = 0;
+  private lastScrollPercent = -1;
   private lastActivity = now();
   private idleTimer: ReturnType<typeof setInterval> | null = null;
   private flushTimer: ReturnType<typeof setInterval> | null = null;
@@ -225,9 +227,18 @@ export class SurfaiTracker {
 
   private onScroll = (): void => {
     this.resetIdle();
+
+    const t = now();
+    const pct = scrollPercent();
+
+    // Throttle: skip if same percent or less than 200ms since last send
+    if (pct === this.lastScrollPercent || t - this.lastScrollSend < 200) return;
+
+    this.lastScrollSend = t;
+    this.lastScrollPercent = pct;
     this.buffer.push({
       type: "scroll",
-      data: { percent: scrollPercent(), ts: now() },
+      data: { percent: pct, ts: t },
     });
   };
 

@@ -4,7 +4,7 @@
   "private": true,
   "description": "SURFAI — Behavioral Analytics Platform",
   "scripts": {
-    "build": "cd client && npx tsc && npx esbuild src/tracker.ts --bundle --format=iife --global-name=SurfaiSDK --footer:js=\"window.SurfaiTracker=SurfaiSDK.SurfaiTracker;\" --outfile=dist/tracker.js --sourcemap --target=es6",
+    "build": "cd client && npx tsc && npx esbuild src/bundle.ts --bundle --format=iife --global-name=SurfaiSDK --footer:js=\"window.SurfaiTracker=SurfaiSDK.SurfaiTrackerBundle;\" --outfile=dist/tracker.js --sourcemap --target=es6",
     "start": "cd server && node server.js",
     "dev": "npm run build && npm start",
     "test": "cd client && npm test && cd ../server && npm test",

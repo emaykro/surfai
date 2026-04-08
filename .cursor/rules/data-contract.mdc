@@ -17,7 +17,7 @@ alwaysApply: false
   - `sessionId`: non-empty string identifying one browser session.
   - `sentAt`: integer unix timestamp in milliseconds, created on the client.
   - `events`: non-empty array of event objects.
-- Allowed event types: `mouse`, `scroll`, `idle`, `click`, `form`, `engagement`, `session`, `context`, `cross_session`, `goal`.
+- Allowed event types: `mouse`, `scroll`, `idle`, `click`, `form`, `engagement`, `session`, `context`, `cross_session`, `goal`, `bot_signals`.
 - Core event shapes:
   - `mouse` -> `{x, y, ts}`
   - `scroll` -> `{percent, ts}`
@@ -31,6 +31,8 @@ alwaysApply: false
   - `cross_session` -> `{visitorId, visitNumber, returnWithin24h, returnWithin7d, ts}`
 - Phase 5 (Goal) event shape:
   - `goal` -> `{goalId, value?, metadata?, ts}` — conversion event; deduped within 5s per goalId+session
+- Bot detection event shape:
+  - `bot_signals` -> `{webdriver, phantom, nightmare, selenium, cdp, pluginCount, languageCount, hasChrome, notificationPermission, hardwareConcurrency, deviceMemory, touchSupport, screenColorDepth, ts}` — one-shot headless/automation fingerprints
 - All numeric fields must be numbers, never strings.
 - `percent` / `maxScrollPercent` must stay in `0..100`.
 - Element selectors and text are hashed with MurmurHash3 (truncated to 120 chars) — never raw strings.

@@ -106,6 +106,7 @@ Every `POST /api/events` body must be:
 | `context` | `trafficSource`, `deviceType`, `browser`, `os`, `screenW`, `screenH`, `language`, `connectionType`, `ts` | Device/traffic context |
 | `cross_session` | `visitorId`, `visitNumber`, `returnWithin24h`, `returnWithin7d`, `ts` | Cross-session tracking |
 | `goal` | `goalId`, `value?`, `metadata?`, `ts` | Conversion goal event |
+| `bot_signals` | `webdriver`, `phantom`, `nightmare`, `selenium`, `cdp`, `pluginCount`, `languageCount`, `hasChrome`, `notificationPermission`, `hardwareConcurrency`, `deviceMemory`, `touchSupport`, `screenColorDepth`, `ts` | Bot/automation fingerprint signals |
 
 ### Dashboard & Management API
 

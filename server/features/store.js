@@ -2,6 +2,7 @@
 
 const { pool } = require("../db");
 const { extractAllFeatures } = require("./extractors");
+const { calculateBotScore } = require("./bot-scoring");
 
 /**
  * Fetch all events for a session from the database, compute features,
@@ -24,6 +25,11 @@ async function computeAndStore(sessionId, projectId, siteId) {
   if (!events.length) return null;
 
   const features = extractAllFeatures(events);
+
+  // Bot detection scoring
+  const botSignalEvents = events.filter((e) => e.type === "bot_signals");
+  const botResult = calculateBotScore(features, botSignalEvents);
+  Object.assign(features, botResult);
 
   // Build the upsert query dynamically from the features object
   const columns = [];
@@ -50,13 +56,14 @@ async function computeAndStore(sessionId, projectId, siteId) {
     "ctx_screen_w", "ctx_screen_h", "ctx_connection_type",
     "cross_visit_number", "cross_return_24h", "cross_return_7d",
     "event_count",
+    "bot_score", "bot_risk_level", "bot_signals", "is_bot",
   ];
 
   for (const col of FEATURE_COLUMNS) {
     let val = features[col];
 
     // Serialize JSONB columns
-    if (col.startsWith("mouse_velocity_") && val != null) {
+    if ((col.startsWith("mouse_velocity_") || col === "bot_signals") && val != null) {
       val = JSON.stringify(val);
     }
 

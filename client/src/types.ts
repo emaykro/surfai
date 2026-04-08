@@ -84,6 +84,23 @@ export interface GoalEventData {
   ts: number;
 }
 
+export interface BotSignalsEventData {
+  webdriver: boolean;
+  phantom: boolean;
+  nightmare: boolean;
+  selenium: boolean;
+  cdp: boolean;
+  pluginCount: number;
+  languageCount: number;
+  hasChrome: boolean;
+  notificationPermission: string;
+  hardwareConcurrency: number;
+  deviceMemory: number;
+  touchSupport: boolean;
+  screenColorDepth: number;
+  ts: number;
+}
+
 export type TrackingEvent =
   | { type: "mouse"; data: MouseEventData }
   | { type: "scroll"; data: ScrollEventData }
@@ -94,7 +111,8 @@ export type TrackingEvent =
   | { type: "session"; data: SessionEventData }
   | { type: "context"; data: ContextEventData }
   | { type: "cross_session"; data: CrossSessionEventData }
-  | { type: "goal"; data: GoalEventData };
+  | { type: "goal"; data: GoalEventData }
+  | { type: "bot_signals"; data: BotSignalsEventData };
 
 // ---------------------------------------------------------------------------
 // Collector interface — all collectors implement this

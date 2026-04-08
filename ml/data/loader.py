@@ -32,6 +32,7 @@ def load_session_features(min_event_count=10, target_column="converted"):
         FROM session_features
         WHERE event_count >= %(min_events)s
           AND {target_column} IS NOT NULL
+          AND (is_bot IS NULL OR is_bot = false)
     """
 
     conn = psycopg2.connect(DATABASE_URL)

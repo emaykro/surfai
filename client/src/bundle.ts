@@ -15,6 +15,7 @@ import { EngagementCollector } from "./collectors/engagement.js";
 import { SessionCollector } from "./collectors/session.js";
 import { ContextCollector } from "./collectors/context.js";
 import { CrossSessionCollector } from "./collectors/cross-session.js";
+import { BotSignalCollector } from "./collectors/bot-signals.js";
 
 // Re-export types for module consumers
 export type { TrackingEvent, TrackerOptions, PageGoalRule, DataLayerMapping, GoalEventData } from "./types.js";
@@ -34,6 +35,7 @@ export class SurfaiTrackerBundle extends SurfaiTracker {
     this.addCollector(new SessionCollector(this));
     this.addCollector(new ContextCollector(this));
     this.addCollector(new CrossSessionCollector(this));
+    this.addCollector(new BotSignalCollector(this));
   }
 }
 

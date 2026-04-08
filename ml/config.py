@@ -11,7 +11,7 @@ TARGET_COLUMN = "converted"
 
 TEST_SIZE = 0.2
 RANDOM_SEED = 42
-MIN_POSITIVE_SAMPLES = 50
+MIN_POSITIVE_SAMPLES = 10
 
 # --- Feature column lists (must match session_features table) ---
 
@@ -55,6 +55,7 @@ NUMERIC_FEATURES = [
     "ctx_screen_w",
     "ctx_screen_h",
     "cross_visit_number",
+    "bot_score",
 ]
 
 BOOLEAN_FEATURES = [
@@ -63,6 +64,7 @@ BOOLEAN_FEATURES = [
     "session_is_hyper",
     "cross_return_24h",
     "cross_return_7d",
+    "is_bot",
 ]
 
 CATEGORICAL_FEATURES = [

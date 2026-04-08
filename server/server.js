@@ -295,7 +295,34 @@ const goalDataSchema = {
   },
 };
 
-const ALL_EVENT_TYPES = ["mouse", "scroll", "idle", "click", "form", "engagement", "session", "context", "cross_session", "goal"];
+const botSignalsDataSchema = {
+  type: "object",
+  required: [
+    "webdriver", "phantom", "nightmare", "selenium", "cdp",
+    "pluginCount", "languageCount", "hasChrome",
+    "notificationPermission", "hardwareConcurrency", "deviceMemory",
+    "touchSupport", "screenColorDepth", "ts",
+  ],
+  additionalProperties: false,
+  properties: {
+    webdriver: { type: "boolean" },
+    phantom: { type: "boolean" },
+    nightmare: { type: "boolean" },
+    selenium: { type: "boolean" },
+    cdp: { type: "boolean" },
+    pluginCount: { type: "number" },
+    languageCount: { type: "number" },
+    hasChrome: { type: "boolean" },
+    notificationPermission: { type: "string" },
+    hardwareConcurrency: { type: "number" },
+    deviceMemory: { type: "number" },
+    touchSupport: { type: "boolean" },
+    screenColorDepth: { type: "number" },
+    ts: { type: "number" },
+  },
+};
+
+const ALL_EVENT_TYPES = ["mouse", "scroll", "idle", "click", "form", "engagement", "session", "context", "cross_session", "goal", "bot_signals"];
 
 const eventItemSchema = {
   type: "object",
@@ -345,6 +372,10 @@ const eventItemSchema = {
     {
       if: { properties: { type: { const: "goal" } } },
       then: { properties: { data: goalDataSchema } },
+    },
+    {
+      if: { properties: { type: { const: "bot_signals" } } },
+      then: { properties: { data: botSignalsDataSchema } },
     },
   ],
 };

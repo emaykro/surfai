@@ -10,9 +10,23 @@ import { now } from "../helpers.js";
  * during the session via PerformanceObserver, then emits one summary
  * `performance` event via the tracker's beforeFlush() hook.
  *
- * The beforeFlush timing matches how SessionCollector works — the final
- * snapshot rides out in the same beacon as the rest of the buffered data
- * on visibilitychange / pagehide / beforeunload.
+ * Emit strategy (same lesson learned from SessionCollector on 2026-04-10):
+ * unload lifecycle events are unreliable in real browsers, so we don't
+ * rely on them alone. PerformanceCollector emits up to three snapshots
+ * per session:
+ *
+ *   1. Early snapshot at 5s — catches bounce sessions shorter than any
+ *      lifecycle event. Ships via the regular 5s fetch flushInterval.
+ *      Data is PARTIAL at this point — LCP may still be a candidate, CLS
+ *      is just beginning to accumulate.
+ *   2. Second snapshot at 20s — longer sessions where LCP has usually
+ *      stabilized and more CLS shifts have been observed.
+ *   3. Final snapshot via beforeFlush() on unload — BEST case, but may
+ *      not fire on mobile browsers or in bfcache scenarios.
+ *
+ * Each emit creates a NEW `performance` event with the current state.
+ * The server-side extractor (extractPerformance) takes the LATEST event,
+ * so the most complete snapshot wins even when earlier ones arrive.
  *
  * Zero runtime deps. Gracefully degrades if PerformanceObserver or a
  * specific entry type is not supported (old browsers, Safari quirks).
@@ -70,20 +84,38 @@ export class PerformanceCollector implements Collector {
   private longTaskTotalMs = 0;
 
   private observers: PerformanceObserver[] = [];
+  private earlyTimer: ReturnType<typeof setTimeout> | null = null;
+  private secondTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Delay before the first fallback snapshot. */
+  private static readonly EARLY_SNAPSHOT_MS = 5000;
+  /** Delay before the second fallback snapshot (longer session coverage). */
+  private static readonly SECOND_SNAPSHOT_MS = 20000;
 
   constructor(tracker: SurfaiTracker) {
     this.tracker = tracker;
   }
 
   start(): void {
-    if (typeof PerformanceObserver === "undefined") return;
+    if (typeof PerformanceObserver !== "undefined") {
+      this.observeLcp();
+      this.observeCls();
+      this.observeFcp();
+      this.observeFirstInput();
+      this.observeEventTiming();
+      this.observeLongTasks();
+    }
 
-    this.observeLcp();
-    this.observeCls();
-    this.observeFcp();
-    this.observeFirstInput();
-    this.observeEventTiming();
-    this.observeLongTasks();
+    // Schedule two fallback snapshots in addition to the beforeFlush upgrade.
+    // These guarantee at least one performance event lands in the DB even
+    // when lifecycle events (pagehide, visibilitychange, beforeunload) fail
+    // to fire — see 2026-04-10 incident in vault/bugs/.
+    this.earlyTimer = setTimeout(() => {
+      this.emitSnapshot();
+    }, PerformanceCollector.EARLY_SNAPSHOT_MS);
+    this.secondTimer = setTimeout(() => {
+      this.emitSnapshot();
+    }, PerformanceCollector.SECOND_SNAPSHOT_MS);
   }
 
   stop(): void {
@@ -91,13 +123,33 @@ export class PerformanceCollector implements Collector {
       try { obs.disconnect(); } catch { /* ignore */ }
     }
     this.observers = [];
+    if (this.earlyTimer !== null) {
+      clearTimeout(this.earlyTimer);
+      this.earlyTimer = null;
+    }
+    if (this.secondTimer !== null) {
+      clearTimeout(this.secondTimer);
+      this.secondTimer = null;
+    }
   }
 
   /**
    * Called by tracker right before the buffer is drained on unload.
-   * Emits one final `performance` event with the accumulated metrics.
+   * Emits one final `performance` event with the latest accumulated
+   * metrics. If earlier snapshots from the 5s / 20s timers already fired,
+   * the server-side extractor takes the last one — this final one is the
+   * most complete.
    */
   beforeFlush(): void {
+    this.emitSnapshot();
+  }
+
+  /**
+   * Push a `performance` event with the current accumulated metrics.
+   * NOT idempotent — each call creates a new event. Multiple snapshots
+   * per session are expected and the extractor picks the last one.
+   */
+  private emitSnapshot(): void {
     try {
       const nav = this.readNavigationTiming();
       this.tracker.pushEvent({

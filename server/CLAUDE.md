@@ -21,12 +21,24 @@ DATABASE_URL=postgresql://… node server.js  # Postgres connection
 | Field | Type | Constraint |
 |-------|------|-----------|
 | `sessionId` | string | non-empty, required |
+| `siteKey` | string | optional; required in production by default (`ALLOW_INGEST_WITHOUT_SITEKEY=false`) |
 | `sentAt` | integer | unix ms, required |
 | `events` | array | min 1 item, required |
-| `events[].type` | enum | `mouse` / `scroll` / `idle` |
-| `events[].data` | object | shape depends on type |
+| `events[].type` | enum | `mouse` / `scroll` / `idle` / `click` / `form` / `engagement` / `session` / `context` / `cross_session` / `goal` / `bot_signals` |
+| `events[].data` | object | shape depends on type; each has its own strict JSON Schema with `additionalProperties: false` |
 
-See root `CLAUDE.md` for per-type data shapes. Any schema change must be mirrored in the SDK types in the same commit.
+See root `CLAUDE.md` for per-type data shapes and field rules.
+
+### Atomicity of ingest
+
+`persistBatch()` writes all events from a single request inside one Postgres `BEGIN` / `COMMIT`. If **any** row fails DB constraints (e.g. a new event `type` that isn't in the `events_type_check` CHECK constraint), the entire batch is rolled back — including every other valid event in the same payload. This was the root cause of a 3-day data loss incident on 2026-04-08–10 when migration 008 added bot detection columns without updating `events_type_check`. See `vault/bugs/2026-04-10 context and session event loss.md`.
+
+Any schema change — adding a field, adding a new event `type`, changing an enum — must be mirrored in **the same commit** across:
+- `client/src/types.ts`
+- `server/server.js` route schema + `ALL_EVENT_TYPES` const
+- `server/migrations/` — a new migration updating `events_type_check` if the `type` enum changed
+- `server/features/extractors.js` if the new shape feeds features
+- Root `CLAUDE.md` + `.cursor/rules/data-contract.mdc`
 
 ## Persistence
 

@@ -35,10 +35,19 @@ This package must have zero runtime dependencies. Only `typescript` is allowed a
 The flush payload sent to the backend must match this shape exactly:
 
 ```
-{ sessionId: string, sentAt: number, events: TrackingEvent[] }
+{ sessionId: string, siteKey?: string, sentAt: number, events: TrackingEvent[] }
 ```
 
-Allowed `TrackingEvent` types: `mouse`, `scroll`, `idle`. See root `CLAUDE.md` for the full schema. Any field change here must be mirrored in backend validation in the same commit.
+Allowed `TrackingEvent.type` values: `mouse`, `scroll`, `idle`, `click`, `form`, `engagement`, `session`, `context`, `cross_session`, `goal`, `bot_signals`. The canonical per-type data shape lives in the `TrackingEvent` discriminated union in `src/types.ts` and mirrored in the root `CLAUDE.md` "Allowed event types" table.
+
+Any field change here must be mirrored in **all** of:
+- `src/types.ts` (SDK union + collectors that emit it)
+- `server/server.js` ingest route schema
+- `server/migrations/` — a new migration for `events_type_check` if adding a new `type` value
+- `server/features/extractors.js` if the new data is a feature input
+- Root `CLAUDE.md` + `.cursor/rules/data-contract.mdc` per the Meta-Sync Protocol
+
+All of the above belong in **one commit**. A mismatch between SDK and DB constraint atomically rejects the entire ingest batch and loses collateral events in the same POST — learned the hard way on 2026-04-08–10 (`vault/bugs/` has the post-mortem).
 
 ## TypeScript
 

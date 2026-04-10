@@ -240,6 +240,55 @@ describe("SessionCollector", () => {
     tracker.stop();
   });
 
+  it("session event survives a buffer with >100 events at unload (regression test)", async () => {
+    // Regression: before the unloading-flag fix, a full buffer (≥100 events)
+    // would trigger pushEvent's auto-flush via async fetch during
+    // runBeforeFlushHooks, race against the page unload, and drop the
+    // session summary. flushBeacon must now drain everything via sendBeacon.
+    const sendBeaconSpy = vi.fn().mockReturnValue(true);
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      sendBeacon: sendBeaconSpy,
+    });
+
+    const tracker = createTracker();
+    const session = new SessionCollector(tracker);
+    tracker.addCollector(session);
+    tracker.start();
+
+    // Fill the buffer directly with 250 synthetic mouse events — more
+    // than the 100-event flush threshold, enough to force multi-beacon
+    // draining. We write directly to the private buffer to bypass
+    // pushEvent's async auto-flush, which would otherwise drain the
+    // events before unload and make the test meaningless.
+    const privateBuf = (tracker as unknown as { buffer: { type: string; data: unknown }[] }).buffer;
+    for (let i = 0; i < 250; i++) {
+      privateBuf.push({ type: "mouse", data: { x: i, y: i, ts: i } });
+    }
+
+    // Simulate page unload
+    window.dispatchEvent(new Event("beforeunload"));
+
+    // Must have sent more than one beacon (drained the whole buffer)
+    expect(sendBeaconSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+    // Collect all events across all beacons and confirm the session summary
+    // is somewhere in the union.
+    const allEvents: { type: string }[] = [];
+    for (const call of sendBeaconSpy.mock.calls) {
+      const blob = call[1] as Blob;
+      const body = JSON.parse(await blob.text());
+      allEvents.push(...body.events);
+    }
+    const sessionEvents = allEvents.filter((e) => e.type === "session");
+    expect(sessionEvents.length).toBe(1);
+    // Buffer should be fully drained
+    const buf = (tracker as unknown as { buffer: unknown[] }).buffer;
+    expect(buf.length).toBe(0);
+
+    tracker.stop();
+  });
+
   it("session event reaches the wire when beforeunload fires (regression test)", async () => {
     // This is the specific bug that motivated the refactor:
     // tracker's own beforeunload listener was registered before SessionCollector's,

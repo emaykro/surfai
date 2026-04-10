@@ -35,6 +35,9 @@ export class SurfaiTracker {
   private idleReported = false;
   private running = false;
   private startTime = 0;
+  /** True once the page has started unloading. Suppresses async auto-flush
+   *  so final data goes out via sendBeacon, not fetch. */
+  private unloading = false;
 
   /** External collectors registered via addCollector() */
   private collectors: Collector[] = [];
@@ -96,8 +99,10 @@ export class SurfaiTracker {
   /** Push an event into the buffer (used by collectors). */
   pushEvent(event: TrackingEvent): void {
     this.buffer.push(event);
-    // Auto-flush if buffer exceeds limit
-    if (this.buffer.length >= SurfaiTracker.MAX_EVENTS_PER_FLUSH) {
+    // Auto-flush if buffer exceeds limit — but never during unload,
+    // where the async fetch path may be cut off before it completes.
+    // flushBeacon() will drain the whole buffer via sendBeacon instead.
+    if (this.buffer.length >= SurfaiTracker.MAX_EVENTS_PER_FLUSH && !this.unloading) {
       this.flush();
     }
   }
@@ -416,12 +421,14 @@ export class SurfaiTracker {
 
   private onVisibilityChange = (): void => {
     if (document.visibilityState === "hidden") {
+      this.unloading = true;
       this.runBeforeFlushHooks();
       this.flushBeacon();
     }
   };
 
   private onBeforeUnload = (): void => {
+    this.unloading = true;
     this.runBeforeFlushHooks();
     this.flushBeacon();
   };
@@ -449,24 +456,42 @@ export class SurfaiTracker {
   }
 
   private flushBeacon(): void {
-    if (this.buffer.length === 0) return;
+    // Drain the entire buffer, splitting into chunks that respect both
+    // MAX_EVENTS_PER_FLUSH and MAX_PAYLOAD_BYTES. Multiple sendBeacon
+    // calls in one unload are allowed by the spec and each survives
+    // the page unload independently.
+    //
+    // Safety cap: never more than 10 beacons per flush to bound the
+    // amount of work we do on an unloading page.
+    let beaconsSent = 0;
+    const MAX_BEACONS = 10;
 
-    const chunk = this.buffer.splice(0, SurfaiTracker.MAX_EVENTS_PER_FLUSH);
-    const body = this.buildPayload(chunk);
+    while (this.buffer.length > 0 && beaconsSent < MAX_BEACONS) {
+      let chunk = this.buffer.splice(0, SurfaiTracker.MAX_EVENTS_PER_FLUSH);
+      let body = this.buildPayload(chunk);
 
-    try {
-      const blob = new Blob([body], { type: "application/json" });
-      const sent = navigator.sendBeacon(this.endpoint, blob);
-      if (!sent) {
-        fetch(this.endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body,
-          keepalive: true,
-        }).catch(() => {});
+      // Shrink chunk until the serialized payload fits the byte budget.
+      while (body.length > SurfaiTracker.MAX_PAYLOAD_BYTES && chunk.length > 1) {
+        this.buffer.unshift(chunk.pop()!);
+        body = this.buildPayload(chunk);
       }
-    } catch {
-      // silently drop
+
+      try {
+        const blob = new Blob([body], { type: "application/json" });
+        const sent = navigator.sendBeacon(this.endpoint, blob);
+        if (!sent) {
+          fetch(this.endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+            keepalive: true,
+          }).catch(() => {});
+        }
+      } catch {
+        // silently drop this chunk, keep draining
+      }
+
+      beaconsSent++;
     }
   }
 

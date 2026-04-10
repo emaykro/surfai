@@ -24,8 +24,10 @@ export class ContextCollector implements Collector {
   }
 
   start(): void {
-    // Emit context once, on next idle callback or immediately
-    const emit = () => {
+    // Emit context synchronously. Reads are cheap (navigator/screen/document.referrer)
+    // and deferring via requestIdleCallback caused bounce sessions to unload before
+    // the callback fired, dropping context for ~95% of traffic.
+    try {
       this.tracker.pushEvent({
         type: "context",
         data: {
@@ -40,12 +42,8 @@ export class ContextCollector implements Collector {
           ts: now(),
         },
       });
-    };
-
-    if (typeof requestIdleCallback === "function") {
-      requestIdleCallback(emit);
-    } else {
-      setTimeout(emit, 0);
+    } catch {
+      /* must never throw into host page */
     }
   }
 

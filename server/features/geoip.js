@@ -59,10 +59,14 @@ const MOBILE_CARRIER_KEYWORDS = [
  * Never throws — logs a warning and leaves the module in a disabled state
  * if the packages or files are unavailable.
  *
+ * Async because maxmind v5 dropped `openSync()`; `open()` returns a Promise.
+ * The returned Reader instances still expose a synchronous `.get(ip)`, so
+ * the `lookup()` method below stays sync.
+ *
  * @param {object} [logger] - Optional Pino-compatible logger for startup messages
- * @returns {boolean} true if all four readers loaded successfully
+ * @returns {Promise<boolean>} true if all four readers loaded successfully
  */
-function init(logger) {
+async function init(logger) {
   if (initialized) return available;
   initialized = true;
 
@@ -94,10 +98,13 @@ function init(logger) {
   }
 
   try {
-    cityReaderV4 = maxmind.openSync(cityV4Path);
-    cityReaderV6 = maxmind.openSync(cityV6Path);
-    asnReaderV4 = maxmind.openSync(asnV4Path);
-    asnReaderV6 = maxmind.openSync(asnV6Path);
+    // maxmind@5 returns Promise<Reader>; Reader.get(ip) itself is sync.
+    [cityReaderV4, cityReaderV6, asnReaderV4, asnReaderV6] = await Promise.all([
+      maxmind.open(cityV4Path),
+      maxmind.open(cityV6Path),
+      maxmind.open(asnV4Path),
+      maxmind.open(asnV6Path),
+    ]);
   } catch (err) {
     log.warn({ err }, "geoip: failed to open MMDB files — enrichment disabled");
     cityReaderV4 = cityReaderV6 = asnReaderV4 = asnReaderV6 = null;

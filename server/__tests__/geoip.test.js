@@ -31,15 +31,17 @@ describe("geoip module", () => {
       assert.doesNotThrow(() => geoip.lookup(undefined));
     });
 
-    it("init() with missing packages sets available=false and does not throw", () => {
+    it("init() with missing packages sets available=false and does not reject", async () => {
       // Capture logger warnings so test output stays clean
       const warnings = [];
       const mockLogger = {
         warn: (obj, msg) => warnings.push(msg || obj),
         info: () => {},
       };
-      // Safe to call repeatedly — second call is a no-op
-      assert.doesNotThrow(() => geoip.init(mockLogger));
+      // init() is async in maxmind@5; must resolve, not reject, even
+      // when the MMDB packages aren't installed locally.
+      const ok = await geoip.init(mockLogger);
+      assert.equal(typeof ok, "boolean");
       // When MMDB packages are genuinely missing in this test env, isAvailable
       // will be false. When they ARE installed (e.g. after npm install on
       // prod), isAvailable is true — both outcomes are valid here.

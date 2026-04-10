@@ -1193,11 +1193,12 @@ fastify.addHook("onClose", async () => {
 
 // Load GeoIP MMDB readers once at startup (optional — server keeps working
 // without them, just with NULL geo_* columns on session_features).
-geoip.init(fastify.log);
-
-fastify.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
-  if (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
+// maxmind@5 is async-only, so we chain the listen() call after init().
+geoip.init(fastify.log).finally(() => {
+  fastify.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
+    if (err) {
+      fastify.log.error(err);
+      process.exit(1);
+    }
+  });
 });

@@ -123,6 +123,13 @@ export interface Collector {
   start(): void;
   /** Stop collecting. Called once by tracker.stop(). */
   stop(): void;
+  /**
+   * Optional: called by tracker right before the buffer is drained on
+   * page hide / unload. Use this to push any final summary events that
+   * must be flushed in the same beacon as the rest of the buffer.
+   * Must be synchronous and must not throw.
+   */
+  beforeFlush?(): void;
 }
 
 // ---------------------------------------------------------------------------

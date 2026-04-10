@@ -3,6 +3,7 @@ import { SurfaiTracker } from "../tracker";
 import { ClickCollector } from "../collectors/click";
 import { ContextCollector } from "../collectors/context";
 import { CrossSessionCollector } from "../collectors/cross-session";
+import { SessionCollector } from "../collectors/session";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -115,8 +116,6 @@ describe("ContextCollector", () => {
     tracker.addCollector(ctx);
     tracker.start();
 
-    // Context uses requestIdleCallback or setTimeout(0)
-    await new Promise((r) => setTimeout(r, 50));
     await tracker.flush();
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -174,6 +173,104 @@ describe("CrossSessionCollector", () => {
     expect(data.visitNumber).toBe(1);
     expect(data.returnWithin24h).toBe(false); // first visit
     expect(data.returnWithin7d).toBe(false);
+
+    tracker.stop();
+  });
+});
+
+describe("SessionCollector", () => {
+  let fetchSpy: ReturnType<typeof mockFetch>;
+
+  beforeEach(() => {
+    fetchSpy = mockFetch();
+    vi.stubGlobal("fetch", fetchSpy);
+    vi.stubGlobal("crypto", { randomUUID: () => "test-uuid" });
+    const store: Record<string, string> = {};
+    vi.stubGlobal("sessionStorage", {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v; },
+    });
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("emits session summary via beforeFlush() into the buffer", () => {
+    const tracker = createTracker();
+    const session = new SessionCollector(tracker);
+    tracker.addCollector(session);
+    tracker.start();
+
+    // Direct unit-level check: beforeFlush() should push a session event
+    // synchronously into the tracker buffer.
+    session.beforeFlush();
+
+    // Drain the buffer manually to inspect what beforeFlush pushed.
+    const buf = (tracker as unknown as { buffer: { type: string; data: unknown }[] }).buffer;
+    const sessionEvents = buf.filter((e) => e.type === "session");
+    expect(sessionEvents.length).toBe(1);
+
+    const data = sessionEvents[0].data as {
+      pageCount: number;
+      timeBucket: string;
+      isBounce: boolean;
+      isHyperEngaged: boolean;
+    };
+    expect(data.pageCount).toBe(1);
+    expect(typeof data.timeBucket).toBe("string");
+    expect(typeof data.isBounce).toBe("boolean");
+    expect(typeof data.isHyperEngaged).toBe("boolean");
+
+    tracker.stop();
+  });
+
+  it("beforeFlush() is idempotent — only emits once per lifetime", () => {
+    const tracker = createTracker();
+    const session = new SessionCollector(tracker);
+    tracker.addCollector(session);
+    tracker.start();
+
+    session.beforeFlush();
+    session.beforeFlush();
+    session.beforeFlush();
+
+    const buf = (tracker as unknown as { buffer: { type: string }[] }).buffer;
+    const sessionEvents = buf.filter((e) => e.type === "session");
+    expect(sessionEvents.length).toBe(1);
+
+    tracker.stop();
+  });
+
+  it("session event reaches the wire when beforeunload fires (regression test)", async () => {
+    // This is the specific bug that motivated the refactor:
+    // tracker's own beforeunload listener was registered before SessionCollector's,
+    // so flushBeacon drained the buffer first and SessionCollector's pushEvent
+    // landed in an already-empty buffer that was never flushed.
+    //
+    // With the beforeFlush() hook, the order is now guaranteed: tracker calls
+    // collectors' beforeFlush() first, then drains.
+
+    // Spy on sendBeacon — flushBeacon prefers it over fetch
+    const sendBeaconSpy = vi.fn().mockReturnValue(true);
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      sendBeacon: sendBeaconSpy,
+    });
+
+    const tracker = createTracker();
+    const session = new SessionCollector(tracker);
+    tracker.addCollector(session);
+    tracker.start();
+
+    // Simulate page unload
+    window.dispatchEvent(new Event("beforeunload"));
+
+    expect(sendBeaconSpy).toHaveBeenCalledTimes(1);
+
+    // Decode the beacon body and verify it contains the session event
+    const blob = sendBeaconSpy.mock.calls[0][1] as Blob;
+    const body = JSON.parse(await blob.text());
+    const sessionEvents = body.events.filter((e: { type: string }) => e.type === "session");
+    expect(sessionEvents.length).toBe(1);
 
     tracker.stop();
   });

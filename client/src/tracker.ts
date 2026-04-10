@@ -186,6 +186,9 @@ export class SurfaiTracker {
     if (this.idleTimer) clearInterval(this.idleTimer);
     if (this.flushTimer) clearInterval(this.flushTimer);
 
+    // Let collectors push any final summary events into the buffer
+    this.runBeforeFlushHooks();
+
     // Stop all registered collectors
     for (const c of this.collectors) {
       try { c.stop(); } catch { /* collector must not crash tracker */ }
@@ -397,13 +400,29 @@ export class SurfaiTracker {
 
   // --- Page lifecycle handlers (sendBeacon fallback) -----------------------
 
+  /**
+   * Give every collector a chance to push final-summary events into the
+   * buffer right before we drain it. Must be called immediately before
+   * flushBeacon() so the summaries land in the same beacon as the rest
+   * of the buffered data.
+   */
+  private runBeforeFlushHooks(): void {
+    for (const c of this.collectors) {
+      if (typeof c.beforeFlush === "function") {
+        try { c.beforeFlush(); } catch { /* must not crash tracker */ }
+      }
+    }
+  }
+
   private onVisibilityChange = (): void => {
     if (document.visibilityState === "hidden") {
+      this.runBeforeFlushHooks();
       this.flushBeacon();
     }
   };
 
   private onBeforeUnload = (): void => {
+    this.runBeforeFlushHooks();
     this.flushBeacon();
   };
 

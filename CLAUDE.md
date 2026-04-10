@@ -107,6 +107,7 @@ Every `POST /api/events` body must be:
 | `cross_session` | `visitorId`, `visitNumber`, `returnWithin24h`, `returnWithin7d`, `ts` | Cross-session tracking |
 | `goal` | `goalId`, `value?`, `metadata?`, `ts` | Conversion goal event |
 | `bot_signals` | `webdriver`, `phantom`, `nightmare`, `selenium`, `cdp`, `pluginCount`, `languageCount`, `hasChrome`, `notificationPermission`, `hardwareConcurrency`, `deviceMemory`, `touchSupport`, `screenColorDepth`, `ts` | Bot/automation fingerprint signals |
+| `performance` | `lcp`, `fcp`, `fid`, `inp`, `cls`, `ttfb`, `domInteractive`, `domContentLoaded`, `loadEvent`, `transferSize`, `longTaskCount`, `longTaskTotalMs`, `ts` | Core Web Vitals + Navigation Timing + Long Tasks. Collected via `PerformanceObserver` throughout the session and emitted **once** via `PerformanceCollector.beforeFlush()` on page unload. All numeric fields nullable (may be missing on short bounces or unsupported browsers). CLS uses the session-window algorithm. INP is a simplified max interaction duration. |
 
 ### Dashboard & Management API
 

@@ -4,6 +4,7 @@ import { ClickCollector } from "../collectors/click";
 import { ContextCollector } from "../collectors/context";
 import { CrossSessionCollector } from "../collectors/cross-session";
 import { SessionCollector } from "../collectors/session";
+import { PerformanceCollector } from "../collectors/performance";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -337,6 +338,56 @@ describe("SessionCollector", () => {
     expect(buf.length).toBe(0);
 
     tracker.stop();
+  });
+
+  it("PerformanceCollector emits a performance event via beforeFlush", () => {
+    const tracker = createTracker();
+    const perf = new PerformanceCollector(tracker);
+    tracker.addCollector(perf);
+    tracker.start();
+
+    // In jsdom, PerformanceObserver is undefined, so start() short-circuits
+    // and the observers never fire. beforeFlush() must still push a single
+    // event with null vitals and zero long-task counters — that's the
+    // intended bounce-session shape.
+    perf.beforeFlush();
+
+    const buf = (tracker as unknown as { buffer: { type: string; data: unknown }[] }).buffer;
+    const perfEvents = buf.filter((e) => e.type === "performance");
+    expect(perfEvents.length).toBe(1);
+
+    const data = perfEvents[0].data as {
+      lcp: number | null;
+      cls: number | null;
+      longTaskCount: number;
+      longTaskTotalMs: number;
+      ts: number;
+    };
+    expect(data.lcp).toBeNull();
+    expect(data.cls).toBeNull();
+    expect(data.longTaskCount).toBe(0);
+    expect(data.longTaskTotalMs).toBe(0);
+    expect(data.ts).toBeTypeOf("number");
+
+    tracker.stop();
+  });
+
+  it("PerformanceCollector start() is safe when PerformanceObserver is undefined", () => {
+    // jsdom does not implement PerformanceObserver by default
+    const originalPO = (globalThis as Record<string, unknown>).PerformanceObserver;
+    (globalThis as Record<string, unknown>).PerformanceObserver = undefined;
+
+    try {
+      const tracker = createTracker();
+      const perf = new PerformanceCollector(tracker);
+      tracker.addCollector(perf);
+      // Must not throw even without PerformanceObserver
+      expect(() => tracker.start()).not.toThrow();
+      expect(() => perf.beforeFlush()).not.toThrow();
+      tracker.stop();
+    } finally {
+      (globalThis as Record<string, unknown>).PerformanceObserver = originalPO;
+    }
   });
 
   it("session event reaches the wire when beforeunload fires (regression test)", async () => {

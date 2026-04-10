@@ -76,6 +76,12 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp) {
     "geo_latitude", "geo_longitude",
     "geo_asn", "geo_asn_org",
     "geo_is_datacenter", "geo_is_mobile_carrier",
+    // Performance / Web Vitals (added 2026-04-10, emitted once per session
+    // via PerformanceCollector.beforeFlush)
+    "perf_lcp", "perf_fcp", "perf_fid", "perf_inp", "perf_cls",
+    "perf_ttfb", "perf_dom_interactive", "perf_dom_content_loaded",
+    "perf_load_event", "perf_transfer_size",
+    "perf_long_task_count", "perf_long_task_total_ms",
     "cross_visit_number", "cross_return_24h", "cross_return_7d",
     "event_count",
     "bot_score", "bot_risk_level", "bot_signals", "is_bot",

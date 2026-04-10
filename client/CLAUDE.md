@@ -38,7 +38,7 @@ The flush payload sent to the backend must match this shape exactly:
 { sessionId: string, siteKey?: string, sentAt: number, events: TrackingEvent[] }
 ```
 
-Allowed `TrackingEvent.type` values: `mouse`, `scroll`, `idle`, `click`, `form`, `engagement`, `session`, `context`, `cross_session`, `goal`, `bot_signals`. The canonical per-type data shape lives in the `TrackingEvent` discriminated union in `src/types.ts` and mirrored in the root `CLAUDE.md` "Allowed event types" table.
+Allowed `TrackingEvent.type` values: `mouse`, `scroll`, `idle`, `click`, `form`, `engagement`, `session`, `context`, `cross_session`, `goal`, `bot_signals`, `performance`. The canonical per-type data shape lives in the `TrackingEvent` discriminated union in `src/types.ts` and mirrored in the root `CLAUDE.md` "Allowed event types" table.
 
 Any field change here must be mirrored in **all** of:
 - `src/types.ts` (SDK union + collectors that emit it)

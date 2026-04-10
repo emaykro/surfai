@@ -159,7 +159,28 @@ const goalDataSchema = {
   },
 };
 
-const ALL_EVENT_TYPES = ["mouse", "scroll", "idle", "click", "form", "engagement", "session", "context", "cross_session", "goal"];
+const performanceDataSchema = {
+  type: "object",
+  required: ["longTaskCount", "longTaskTotalMs", "ts"],
+  additionalProperties: false,
+  properties: {
+    lcp: { type: ["number", "null"] },
+    fcp: { type: ["number", "null"] },
+    fid: { type: ["number", "null"] },
+    inp: { type: ["number", "null"] },
+    cls: { type: ["number", "null"] },
+    ttfb: { type: ["number", "null"] },
+    domInteractive: { type: ["number", "null"] },
+    domContentLoaded: { type: ["number", "null"] },
+    loadEvent: { type: ["number", "null"] },
+    transferSize: { type: ["number", "null"] },
+    longTaskCount: { type: "number" },
+    longTaskTotalMs: { type: "number" },
+    ts: { type: "number" },
+  },
+};
+
+const ALL_EVENT_TYPES = ["mouse", "scroll", "idle", "click", "form", "engagement", "session", "context", "cross_session", "goal", "bot_signals", "performance"];
 
 const eventItemSchema = {
   type: "object",
@@ -180,6 +201,7 @@ const eventItemSchema = {
     { if: { properties: { type: { const: "context" } } }, then: { properties: { data: contextDataSchema } } },
     { if: { properties: { type: { const: "cross_session" } } }, then: { properties: { data: crossSessionDataSchema } } },
     { if: { properties: { type: { const: "goal" } } }, then: { properties: { data: goalDataSchema } } },
+    { if: { properties: { type: { const: "performance" } } }, then: { properties: { data: performanceDataSchema } } },
   ],
 };
 
@@ -321,6 +343,54 @@ describe("POST /api/events — Phase 2 event types", () => {
   it("accepts valid goal event", async () => {
     const res = await inject(validPayload({
       events: [{ type: "goal", data: { goalId: "purchase", ts } }],
+    }));
+    assert.equal(res.statusCode, 200);
+  });
+
+  it("accepts valid performance event with nulls for unknown metrics", async () => {
+    const res = await inject(validPayload({
+      events: [{
+        type: "performance",
+        data: {
+          lcp: 2400,
+          fcp: 1200,
+          fid: 18,
+          inp: 80,
+          cls: 0.0523,
+          ttfb: 340,
+          domInteractive: 1800,
+          domContentLoaded: 2100,
+          loadEvent: 3500,
+          transferSize: 45230,
+          longTaskCount: 3,
+          longTaskTotalMs: 280,
+          ts,
+        },
+      }],
+    }));
+    assert.equal(res.statusCode, 200);
+  });
+
+  it("accepts performance event with all vitals as null (bounce session)", async () => {
+    const res = await inject(validPayload({
+      events: [{
+        type: "performance",
+        data: {
+          lcp: null,
+          fcp: null,
+          fid: null,
+          inp: null,
+          cls: null,
+          ttfb: null,
+          domInteractive: null,
+          domContentLoaded: null,
+          loadEvent: null,
+          transferSize: null,
+          longTaskCount: 0,
+          longTaskTotalMs: 0,
+          ts,
+        },
+      }],
     }));
     assert.equal(res.statusCode, 200);
   });

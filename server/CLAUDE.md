@@ -24,7 +24,7 @@ DATABASE_URL=postgresql://… node server.js  # Postgres connection
 | `siteKey` | string | optional; required in production by default (`ALLOW_INGEST_WITHOUT_SITEKEY=false`) |
 | `sentAt` | integer | unix ms, required |
 | `events` | array | min 1 item, required |
-| `events[].type` | enum | `mouse` / `scroll` / `idle` / `click` / `form` / `engagement` / `session` / `context` / `cross_session` / `goal` / `bot_signals` |
+| `events[].type` | enum | `mouse` / `scroll` / `idle` / `click` / `form` / `engagement` / `session` / `context` / `cross_session` / `goal` / `bot_signals` / `performance` |
 | `events[].data` | object | shape depends on type; each has its own strict JSON Schema with `additionalProperties: false` |
 
 See root `CLAUDE.md` for per-type data shapes and field rules.

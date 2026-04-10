@@ -103,6 +103,26 @@ export interface GoalEventData {
   ts: number;
 }
 
+export interface PerformanceEventData {
+  // Core Web Vitals — all nullable because they can be missing on short
+  // sessions, old browsers, or unsupported entry types.
+  lcp: number | null;              // Largest Contentful Paint (ms)
+  fcp: number | null;              // First Contentful Paint (ms)
+  fid: number | null;              // First Input Delay (ms)
+  inp: number | null;              // Interaction to Next Paint — simplified max (ms)
+  cls: number | null;              // Cumulative Layout Shift — session-window
+  // Navigation Timing (ms from navigation start)
+  ttfb: number | null;             // Time to First Byte (responseStart)
+  domInteractive: number | null;
+  domContentLoaded: number | null;
+  loadEvent: number | null;
+  transferSize: number | null;     // bytes of the HTML document
+  // Main-thread health
+  longTaskCount: number;           // count of tasks >50ms
+  longTaskTotalMs: number;         // total blocking time across long tasks
+  ts: number;
+}
+
 export interface BotSignalsEventData {
   webdriver: boolean;
   phantom: boolean;
@@ -131,7 +151,8 @@ export type TrackingEvent =
   | { type: "context"; data: ContextEventData }
   | { type: "cross_session"; data: CrossSessionEventData }
   | { type: "goal"; data: GoalEventData }
-  | { type: "bot_signals"; data: BotSignalsEventData };
+  | { type: "bot_signals"; data: BotSignalsEventData }
+  | { type: "performance"; data: PerformanceEventData };
 
 // ---------------------------------------------------------------------------
 // Collector interface — all collectors implement this

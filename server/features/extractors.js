@@ -424,6 +424,34 @@ function extractContext(events) {
 }
 
 // ---------------------------------------------------------------------------
+// Performance (Web Vitals + Navigation Timing)
+// ---------------------------------------------------------------------------
+
+function extractPerformance(events) {
+  if (!events.length) return {};
+
+  // Take the latest performance snapshot. PerformanceCollector typically
+  // emits once per session (beforeFlush), but if multiple snapshots arrive
+  // (e.g. via BFCache restore) the last one has the most complete data.
+  const latest = events[events.length - 1].data;
+
+  return {
+    perf_lcp: latest.lcp ?? null,
+    perf_fcp: latest.fcp ?? null,
+    perf_fid: latest.fid ?? null,
+    perf_inp: latest.inp ?? null,
+    perf_cls: latest.cls ?? null,
+    perf_ttfb: latest.ttfb ?? null,
+    perf_dom_interactive: latest.domInteractive ?? null,
+    perf_dom_content_loaded: latest.domContentLoaded ?? null,
+    perf_load_event: latest.loadEvent ?? null,
+    perf_transfer_size: latest.transferSize ?? null,
+    perf_long_task_count: typeof latest.longTaskCount === "number" ? latest.longTaskCount : 0,
+    perf_long_task_total_ms: typeof latest.longTaskTotalMs === "number" ? latest.longTaskTotalMs : 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Cross-session
 // ---------------------------------------------------------------------------
 
@@ -464,6 +492,7 @@ function extractAllFeatures(events) {
     ...extractSession(byType.session || [], events),
     ...extractContext(byType.context || []),
     ...extractCrossSession(byType.cross_session || []),
+    ...extractPerformance(byType.performance || []),
     event_count: events.length,
   };
 
@@ -480,5 +509,6 @@ module.exports = {
   extractSession,
   extractContext,
   extractCrossSession,
+  extractPerformance,
   slidingWindow,
 };

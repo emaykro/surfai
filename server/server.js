@@ -348,7 +348,31 @@ const botSignalsDataSchema = {
   },
 };
 
-const ALL_EVENT_TYPES = ["mouse", "scroll", "idle", "click", "form", "engagement", "session", "context", "cross_session", "goal", "bot_signals"];
+const performanceDataSchema = {
+  type: "object",
+  // All core web vitals are nullable — can be missing on short bounces,
+  // unsupported browsers, or before the observers have accumulated data.
+  // `longTaskCount` / `longTaskTotalMs` are counters and always present.
+  required: ["longTaskCount", "longTaskTotalMs", "ts"],
+  additionalProperties: false,
+  properties: {
+    lcp: { type: ["number", "null"] },
+    fcp: { type: ["number", "null"] },
+    fid: { type: ["number", "null"] },
+    inp: { type: ["number", "null"] },
+    cls: { type: ["number", "null"] },
+    ttfb: { type: ["number", "null"] },
+    domInteractive: { type: ["number", "null"] },
+    domContentLoaded: { type: ["number", "null"] },
+    loadEvent: { type: ["number", "null"] },
+    transferSize: { type: ["number", "null"] },
+    longTaskCount: { type: "number" },
+    longTaskTotalMs: { type: "number" },
+    ts: { type: "number" },
+  },
+};
+
+const ALL_EVENT_TYPES = ["mouse", "scroll", "idle", "click", "form", "engagement", "session", "context", "cross_session", "goal", "bot_signals", "performance"];
 
 const eventItemSchema = {
   type: "object",
@@ -402,6 +426,10 @@ const eventItemSchema = {
     {
       if: { properties: { type: { const: "bot_signals" } } },
       then: { properties: { data: botSignalsDataSchema } },
+    },
+    {
+      if: { properties: { type: { const: "performance" } } },
+      then: { properties: { data: performanceDataSchema } },
     },
   ],
 };

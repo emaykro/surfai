@@ -10,15 +10,30 @@ Python ML pipeline (`ml/`) trains CatBoost models on session features to predict
 
 ```
 client/            Vanilla TypeScript SDK (zero runtime deps)
-  src/tracker.ts     Core tracker: listeners, batching, flush
-  dist/              Compiled output (ES6, declarations, source maps)
+  src/tracker.ts     Core tracker: listeners, batching, flush, lifecycle hooks
+  src/types.ts       TrackingEvent discriminated union + Collector interface
+  src/helpers.ts     Cheap extractors: device/browser/os/traffic-source/timezone/utm/...
+  src/collectors/    Modular collectors:
+    click.ts, form.ts, engagement.ts, session.ts, context.ts,
+    cross-session.ts, bot-signals.ts, performance.ts
+  src/bundle.ts      Bundle entry — registers every collector on SurfaiTracker
+  dist/              Compiled output (ES6, IIFE, source maps) — gitignored
   index.html         E2E test page (loads SDK in browser)
 server/            Node.js ingest server
-  server.js          Fastify HTTP entry point + static file serving for dev
-  features/          Feature engineering pipeline
-    extractors.js      Mouse, scroll, click, form, engagement extractors
-    store.js           Compute & upsert features into session_features table
-    backfill.js        Backfill script for existing sessions
+  server.js          Fastify HTTP entry point, routes, schemas, static file serving
+  db.js              pg.Pool connection
+  migrate.js         Migration runner for server/migrations/*.sql
+  features/          Feature engineering + enrichment pipeline
+    extractors.js      Per-event extractors (mouse, scroll, click, form,
+                       engagement, session, context, cross_session, performance)
+    store.js           computeAndStore() — fetches events, extracts features,
+                       runs bot scoring, merges GeoIP + UA-CH, upserts into
+                       session_features
+    bot-scoring.js     Fingerprint + behavioral bot score
+    geoip.js           MMDB reader singleton (dbip-city + asn), lookup(ip)
+    ua-client-hints.js parseUaClientHints(headers) — Sec-CH-UA-* parser
+    backfill.js        Batch backfill script for existing sessions
+  migrations/        Numbered SQL migrations (001–013+); see Migrations section below
 dashboard/         Analytics dashboard (vanilla JS, zero deps)
   index.html         Main dashboard page — session list, live feed, replay
 cabinet/           Operator cabinet (vanilla JS, zero deps)
@@ -37,7 +52,7 @@ ml/                Python CatBoost training pipeline
 vault/             Persistent context store (survives context loss)
   decisions/         Architectural decisions (ADR-like records)
   sessions/          End-of-day session summaries
-  bugs/              Bug investigations and resolutions
+  bugs/              Bug investigations and post-mortems
 ```
 
 ## Build & Run
@@ -147,20 +162,40 @@ Operator Cabinet: `http://localhost:3000/cabinet/`
 
 ## Current Strategy
 
-**Active Phase:** Phase 6 — Multi-Project Data Model & Operator Cabinet.
-Phases 1–5 complete. CatBoost training pipeline (`ml/`) built and smoke-tested.
+**Active Phase:** Phase 6.5 — Data Enrichment Sprint (informal interim phase between Phase 6 and Phase 7).
+Phases 1–6 complete. Bot detection layer deployed 2026-04-08. Telemetry reliability incident resolved 2026-04-10. Significant data enrichment happened 2026-04-10: extended context, GeoIP, Web Vitals, UA Client Hints. Feature count grew from ~57 to ~103.
 
 **Operating model:** Operator-managed platform. Internal team connects tracker to client sites via GTM, manages projects through operator cabinet. No client-facing self-serve yet.
 
-**Focus:**
-- Multi-project isolation: `projects`, `sites`, `siteKey` auth
-- Extend existing tables with `project_id` / `site_id`
-- Operator cabinet: project CRUD, site onboarding, GTM snippet generator
-- SDK: `siteKey` in every batch, server-side origin validation
+**Focus right now:**
+- Accumulate data on the new feature set (currently ~500 sessions/day, need ~50+ real conversions for robust retrain on the enlarged feature space)
+- Dashboard segmentation by the new dimensions (country/city/UTM/device/browser/LCP/bot score)
+- Page classification + first-touch attribution + scroll milestones (planned next)
+- Then retrain CatBoost and move into real Phase 7 (hierarchical ML)
 
-**Revised phase order:** 6=Multi-Project → 7=Hierarchical ML → 8=Predictive Export to GA4/Metrika → 9=Hardening → 10=Public SaaS
+**Revised phase order:** 6=Multi-Project → **6.5=Data Enrichment (current)** → 7=Hierarchical ML → 8=Predictive Export to GA4/Metrika → 9=Hardening → 10=Public SaaS
 
 **Master Roadmap:** `vault/decisions/2026-04-02_long_term_development_roadmap.md`
+
+## Migrations (server/migrations/)
+
+| # | File | Adds |
+|---|---|---|
+| 001 | `initial_schema.sql` | `sessions`, `raw_batches`, `events` |
+| 002 | `expanded_event_types.sql` | `events_type_check` with click/form/engagement/session/context/cross_session |
+| 003 | `dashboard_indexes.sql` | Query indexes for session list / detail |
+| 004 | `feature_store.sql` | `session_features` table |
+| 005 | `goals_and_conversions.sql` | `goals`, `conversions`, primary-goal column |
+| 006 | `goal_event_type.sql` | `goal` in `events_type_check` |
+| 007 | `multi_project.sql` | `projects`, `sites`, `site_key`, `project_id`/`site_id` on everything |
+| 008 | `bot_detection.sql` | `bot_score`, `bot_risk_level`, `bot_signals`, `is_bot` on `session_features` |
+| 009 | `bot_signals_event_type.sql` | `bot_signals` in `events_type_check` (missed in 008) |
+| 010 | `extended_context_fields.sql` | 16 `ctx_*` extended columns (timezone, viewport, dpr, utm, hardware, ...) |
+| 011 | `geoip_enrichment.sql` | 10 `geo_*` columns (country, region, city, ASN, org, is_datacenter, ...) |
+| 012 | `performance_event_type.sql` | `performance` in `events_type_check` + 12 `perf_*` columns (LCP, CLS, ...) |
+| 013 | `ua_client_hints.sql` | 8 `uah_*` columns (brand, mobile, platform, model, arch, ...) |
+
+**Critical rule:** any new `events.type` value requires updating `events_type_check` in a migration in the SAME commit as the SDK change. Otherwise atomic `persistBatch` will reject every batch containing the new type. Learned from the 2026-04-08 incident — see `vault/bugs/2026-04-10 context and session event loss.md`.
 
 ## Conventions
 

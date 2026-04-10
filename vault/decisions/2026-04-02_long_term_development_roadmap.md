@@ -1,6 +1,6 @@
 # SURFAI — Long-Term Development Roadmap
 
-Master Reference Document. Created 2026-04-02. Updated 2026-04-03.
+Master Reference Document. Created 2026-04-02. Updated 2026-04-03, 2026-04-10.
 
 **Operating model**: Operator-managed predictive analytics platform. Internal team manages all projects. No client self-serve yet.
 
@@ -146,7 +146,7 @@ Master Reference Document. Created 2026-04-02. Updated 2026-04-03.
 
 ---
 
-## Phase 6: Multi-Project Data Model & Operator Cabinet
+## Phase 6: Multi-Project Data Model & Operator Cabinet ✅ COMPLETE
 
 **Goal:** Introduce project/site isolation so we can connect tracker to multiple client sites, store data separately per project, and manage everything from one internal operator console.
 
@@ -200,6 +200,64 @@ Master Reference Document. Created 2026-04-02. Updated 2026-04-03.
 - [x] Feature recomputation stores project_id/site_id on session_features
 
 **Dependencies:** Phase 5.
+
+**Status:** Complete. 5 client sites connected under project "Luch" (services vertical). Operator cabinet handles all current needs. Goal management in-cabinet is the only deferred item, can wait until self-serve SaaS phase.
+
+---
+
+## Phase 6.5: Data Enrichment Sprint ✅ DONE (2026-04-10, unplanned)
+
+**Goal:** Maximize the per-session data we collect so that Phase 7 (ML retraining) has the strongest possible feature set before we run out of easy wins. Also: unblock the "real analytics dashboard" vision by adding universal dimensions that work for any vertical.
+
+This sprint was NOT in the original roadmap. It happened because (a) the 2026-04-08 bot detection deploy introduced a caskade of telemetry-reliability bugs that had to be fixed anyway, and (b) after fixing them we noticed how much cheap, universal data we were leaving on the table. Feature count grew from ~57 to ~103 in one day.
+
+### 6.5.1 Telemetry reliability (prerequisite fixes)
+- [x] ContextCollector / BotSignalCollector: remove `requestIdleCallback`, emit synchronously (commit `36f7a69`)
+- [x] Migration 009: add `bot_signals` to `events_type_check` (missed in 008, caused 3-day atomic-batch data loss — see `vault/bugs/2026-04-10 context and session event loss.md`)
+- [x] nginx `/dist/` cache: 24h → 5min must-revalidate (in-place edit on prod, backup at `/root/surfai.conf.bak.20260410-143837`)
+- [x] `Collector.beforeFlush()` hook on the tracker interface; SessionCollector refactored onto it (commit `cf358db`)
+- [x] `flushBeacon` drain whole buffer via while-loop; `unloading` flag suppresses async auto-flush during unload (commit `f821009`)
+- [x] Add `pagehide` listener; SessionCollector early snapshot via `setTimeout(3000)` (commit `352b7d2`)
+
+### 6.5.2 Extended Context (migration 010)
+- [x] Client `ContextCollector` gains 16 new fields: timezone (IANA) + timezoneOffset, languages[], viewportW/H, devicePixelRatio, colorScheme, reducedMotion, hardwareConcurrency, deviceMemory, referrerHost, utmSource/Medium/Campaign/Term/Content
+- [x] All new fields optional on server schema for backward-compat with cached pre-extension bundles
+- [x] `session_features` columns + `ml/config.py` numeric / categorical / boolean lists
+- Commit `14e7075`
+
+### 6.5.3 GeoIP Enrichment (migration 011)
+- [x] `server/features/geoip.js` singleton MMDB reader using `maxmind@5` async API
+- [x] `@ip-location-db/dbip-city-mmdb` (CC BY 4.0 by DB-IP, ~135 MB) + `@ip-location-db/asn-mmdb` (CC BY 4.0 by RouteViews + DB-IP, ~7 MB)
+- [x] 10 `geo_*` columns: country (ISO2), region, city, timezone, latitude, longitude, asn, asn_org, is_datacenter, is_mobile_carrier
+- [x] Keyword-based `is_datacenter` / `is_mobile_carrier` classifier on ASN org strings (80+ known orgs)
+- [x] `Fastify.trustProxy = "127.0.0.1"` so `request.ip` comes from nginx `X-Forwarded-For`, not localhost
+- [x] Raw IP NEVER stored — read once, passed to `computeAndStore`, discarded
+- [x] Attribution link to https://db-ip.com/ in the dashboard is TODO (CC BY 4.0 requirement)
+- Commits `cff65a2` + `6cee448` (async API) + `1288742` (field name `country_code`)
+
+### 6.5.4 Performance / Web Vitals (migration 012)
+- [x] New `performance` event type: LCP, FCP, FID, INP (simplified max), CLS (session-window algorithm), TTFB, domInteractive, domContentLoaded, loadEvent, transferSize, longTaskCount, longTaskTotalMs
+- [x] `PerformanceCollector` subscribes to `PerformanceObserver` entry types: `largest-contentful-paint`, `layout-shift`, `paint`, `first-input`, `event`, `longtask`
+- [x] Emits via TWO fallback snapshots (setTimeout 5s and 20s) + optional beforeFlush upgrade — lifecycle events alone are unreliable (learned twice today)
+- [x] 12 `perf_*` columns on `session_features`, all numeric, all feed ML directly
+- Commits `aecdc5d` + `205ce4f` (early snapshots fix)
+
+### 6.5.5 UA Client Hints (migration 013)
+- [x] Server parses `Sec-CH-UA-*` HTTP headers into 8 `uah_*` columns
+- [x] `Accept-CH` response header set globally via `onSend` hook as best-effort opt-in for high-entropy hints
+- [x] Low-entropy hints (brand/mobile/platform) arrive automatically on every Chromium request
+- [x] Firefox/Safari leave `uah_*` fields NULL (expected)
+- Commit `3dc98e1`
+
+### 6.5.6 Documentation & memory
+- [x] Full-day session summary: `vault/sessions/2026-04-10 telemetry recovery context bot_signals session event pipeline fix.md`
+- [x] Bug post-mortem: `vault/bugs/2026-04-10 context and session event loss.md`
+- [x] Worldspace.md rewritten, client/server CLAUDE.md Data Contract sections updated, meta-sync rules updated
+- [x] Two SDK telemetry lessons saved to auto-memory (no `requestIdleCallback` for critical one-shot; new event type needs DB constraint in same commit; any unload-dependent collector needs an early snapshot fallback)
+
+**Dependencies:** Phase 6.
+
+**Status:** All items complete, production verified. Feature count: 57 → 103. Test count: client vitest 20 → 27, server node:test 57 → 79. All five client sites now collect the enriched feature set.
 
 ---
 
@@ -322,5 +380,5 @@ Master Reference Document. Created 2026-04-02. Updated 2026-04-03.
 
 - Each phase builds on the previous; no phase should be started before its dependencies are marked complete.
 - Within a phase, tasks can be parallelized where there are no data dependencies.
-- The roadmap is a living document — update status and adjust scope as we learn.
-- **Current focus: Phase 6** — without project isolation, we cannot connect real client sites or train meaningful per-project models.
+- The roadmap is a living document — update status and adjust scope as we learn. Phase 6.5 (Data Enrichment Sprint) was added retroactively after the 2026-04-10 work.
+- **Current focus: accumulate data on the enriched feature set + dashboard segmentation UI** — waiting for ~50+ real conversions before Phase 7 retrain. In the meantime, low-cost data work that serves the analytics-dashboard vision: page classification, first-touch attribution, scroll milestones, custom dimensions from dataLayer.

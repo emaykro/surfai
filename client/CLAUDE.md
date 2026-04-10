@@ -17,6 +17,21 @@ This package must have zero runtime dependencies. Only `typescript` is allowed a
 - Event listeners must use `{ passive: true }` where applicable (scroll).
 - High-frequency events (`mousemove`) must be throttled; default sample rate is 150ms.
 - `start()` / `stop()` must be safe to call multiple times without stacking duplicate listeners or timers.
+- **Never use `requestIdleCallback` for one-shot critical telemetry.** It never fires on bounce sessions before unload. Cheap synchronous reads (navigator/screen/document.referrer/Intl) must emit directly in `start()`, wrapped in try/catch.
+- **Unload-dependent collectors must have an early snapshot fallback.** The lifecycle events (`pagehide`, `visibilitychange`, `beforeunload`) are unreliable in real browsers, especially mobile. Any collector that emits a summary via `beforeFlush()` MUST also schedule a `setTimeout(N)` early snapshot in `start()` so the event rides out through the regular fetch flushInterval, not sendBeacon at unload. SessionCollector does this at 3s; PerformanceCollector does it at 5s + 20s. Both were broken in production for hours before the fallback was added — do not repeat this mistake for new collectors.
+
+## Collector Inventory (src/collectors/)
+
+| File | Emits event type(s) | Strategy |
+|---|---|---|
+| `click.ts` | `click` | Listener on `click`, 10px grid coords, hashed selectors |
+| `form.ts` | `form` | Listeners on `focus` / `blur` / `submit` / `pagehide`, no field values |
+| `engagement.ts` | `engagement` | Periodic snapshot via `setInterval` |
+| `session.ts` | `session` | Early snapshot at 3s + final via `beforeFlush`, idempotent |
+| `context.ts` | `context` | Single synchronous emit in `start()` |
+| `cross-session.ts` | `cross_session` | Single emit from localStorage visitorId |
+| `bot-signals.ts` | `bot_signals` | Single synchronous emit in `start()` |
+| `performance.ts` | `performance` | `PerformanceObserver` accumulates + two early snapshots (5s / 20s) + `beforeFlush`; extractor takes latest |
 
 ## Batch Limits
 

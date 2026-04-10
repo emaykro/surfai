@@ -40,10 +40,20 @@ async function requireOperatorAuth(request, reply) {
 fastify.addHook("onSend", async (_request, reply, payload) => {
   reply.header("X-Content-Type-Options", "nosniff");
   reply.header("X-Frame-Options", "DENY");
+  // Ask Chromium-based browsers to include high-entropy User-Agent Client
+  // Hints on subsequent requests to this origin. Low-entropy hints
+  // (Sec-CH-UA, Sec-CH-UA-Mobile, Sec-CH-UA-Platform) are always sent;
+  // this header opts in for the richer ones. Cross-origin delivery still
+  // depends on the client site's Permission-Policy, so this is best-effort.
+  reply.header(
+    "Accept-CH",
+    "Sec-CH-UA-Platform-Version, Sec-CH-UA-Arch, Sec-CH-UA-Bitness, Sec-CH-UA-Model, Sec-CH-UA-Full-Version-List"
+  );
   return payload;
 });
 const { computeAndStore } = require("./features/store");
 const geoip = require("./features/geoip");
+const { parseUaClientHints } = require("./features/ua-client-hints");
 
 // ---------------------------------------------------------------------------
 // CORS — explicit origins; never open `*` in production
@@ -510,6 +520,11 @@ fastify.post(
     // only passed to computeAndStore for one-shot lookup.
     const clientIp = request.ip;
 
+    // Parse UA Client Hints from the request headers. Works for Chromium-
+    // based browsers; Firefox/Safari will yield all-null values which is
+    // fine — CatBoost handles NaN natively.
+    const uaHints = parseUaClientHints(request.headers);
+
     // Respond immediately — DB write must not block the client
     reply.send({ ok: true });
 
@@ -517,10 +532,10 @@ fastify.post(
     persistBatch(sessionId, sentAt, events, projectId, siteId)
       .then(() => {
         broadcastSSE({ sessionId, sentAt, events, projectId });
-        // Recompute features after new data is persisted. clientIp is
-        // passed through so the GeoIP lookup result lands in session_features
-        // in the same UPSERT as the behavioral features.
-        return computeAndStore(sessionId, projectId, siteId, clientIp);
+        // Recompute features after new data is persisted. clientIp and
+        // uaHints are passed through so GeoIP lookup and UA-CH data land
+        // in session_features in the same UPSERT as the behavioral features.
+        return computeAndStore(sessionId, projectId, siteId, clientIp, uaHints);
       })
       .then(() => {
         fastify.log.debug({ sessionId }, "features recomputed");

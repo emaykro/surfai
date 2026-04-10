@@ -240,6 +240,14 @@ Two config files manage MCP servers for the two agents:
 
 When adding or removing MCP servers, update **both** config files if the server is shared.
 
+## UA Client Hints
+
+In addition to parsing `navigator.userAgent` on the client, the server reads `Sec-CH-UA-*` HTTP headers from every ingest request and writes derived `uah_*` columns to `session_features` (`uah_brand`, `uah_brand_version`, `uah_mobile`, `uah_platform`, `uah_platform_version`, `uah_model`, `uah_arch`, `uah_bitness`). This gives structured, reliable device identification without regex-parsing the raw UA string. Firefox and Safari do not send these headers — those sessions get NULL `uah_*` fields.
+
+Module: `server/features/ua-client-hints.js` — `parseUaClientHints(headers)`. Called once per batch in the ingest handler, result passed to `computeAndStore(sessionId, projectId, siteId, clientIp, uaHints)`.
+
+Low-entropy hints (`Sec-CH-UA`, `Sec-CH-UA-Mobile`, `Sec-CH-UA-Platform`) arrive automatically on every Chromium request. High-entropy hints (`Sec-CH-UA-Platform-Version`, `Sec-CH-UA-Model`, `Sec-CH-UA-Arch`, `Sec-CH-UA-Bitness`) require the browser to have seen an `Accept-CH` header from our origin — we set one globally via the `onSend` hook as a best-effort opt-in. Cross-origin delivery also depends on the client site's `Permission-Policy`, which we don't control, so high-entropy hints are best-effort.
+
 ## GeoIP Enrichment
 
 Starting 2026-04-10, the ingest path looks up the client IP against local MMDB files at `session_features` UPSERT time and writes the derived `geo_*` columns (country, region, city, timezone, lat/long, ASN, ASN org, `is_datacenter`, `is_mobile_carrier`). The raw IP is **never stored** — it lives only in `request.ip` for the duration of the ingest handler.

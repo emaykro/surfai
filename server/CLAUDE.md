@@ -68,6 +68,14 @@ Any schema change — adding a field, adding a new event `type`, changing an enu
 | `ALLOW_INGEST_WITHOUT_SITEKEY` | `false` | Set `true` for local dev without siteKey setup |
 | `LOG_LEVEL` | `info` | Pino log level |
 
+## UA Client Hints
+
+`server/features/ua-client-hints.js` — pure function `parseUaClientHints(headers)` that reads `Sec-CH-UA`, `Sec-CH-UA-Mobile`, `Sec-CH-UA-Platform`, `Sec-CH-UA-Platform-Version`, `Sec-CH-UA-Model`, `Sec-CH-UA-Arch`, `Sec-CH-UA-Bitness` from Node request headers and returns a flat `{ uah_brand, uah_brand_version, uah_mobile, uah_platform, uah_platform_version, uah_model, uah_arch, uah_bitness }` object.
+
+Called once per batch in the `POST /api/events` handler; result passed to `computeAndStore(sessionId, projectId, siteId, clientIp, uaHints)` and merged into the `session_features` UPSERT.
+
+A global `Accept-CH` response header is set via the `onSend` hook in `server.js`, asking Chromium browsers to include the high-entropy hints on subsequent requests. Whether they actually arrive depends on the client site's `Permission-Policy` for cross-origin hint delegation.
+
 ## GeoIP enrichment
 
 `server/features/geoip.js` is a singleton initialized at startup via `geoip.init(fastify.log)`. It loads MMDB files from `@ip-location-db/dbip-city-mmdb` and `@ip-location-db/asn-mmdb` once and exposes a sync `lookup(ip)` method. The ingest route captures `request.ip` and passes it to `computeAndStore(sessionId, projectId, siteId, clientIp)`, which merges the lookup result (country/region/city/timezone/lat-long/ASN/org/is_datacenter/is_mobile_carrier) into `session_features` in the same UPSERT as behavioral features.

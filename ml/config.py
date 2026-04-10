@@ -95,6 +95,8 @@ BOOLEAN_FEATURES = [
     # GeoIP enrichment
     "geo_is_datacenter",
     "geo_is_mobile_carrier",
+    # UA Client Hints
+    "uah_mobile",
 ]
 
 CATEGORICAL_FEATURES = [
@@ -119,6 +121,14 @@ CATEGORICAL_FEATURES = [
     "geo_city",
     "geo_timezone",
     "geo_asn_org",
+    # UA Client Hints (added 2026-04-10)
+    "uah_brand",
+    "uah_brand_version",
+    "uah_platform",
+    "uah_platform_version",
+    "uah_model",
+    "uah_arch",
+    "uah_bitness",
 ]
 
 JSONB_WINDOW_COLUMNS = [

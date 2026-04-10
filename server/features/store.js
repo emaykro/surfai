@@ -14,9 +14,12 @@ const geoip = require("./geoip");
  * @param {string} [siteId]
  * @param {string} [clientIp] - Client IP for GeoIP enrichment. NOT stored
  *   anywhere; only the lookup result is persisted into geo_* columns.
+ * @param {object} [uaHints] - Pre-parsed UA Client Hints from request headers
+ *   (see features/ua-client-hints.js). NOT the raw user-agent — structured
+ *   Sec-CH-UA-* fields. Merged directly into the features map.
  * @returns {object} computed features
  */
-async function computeAndStore(sessionId, projectId, siteId, clientIp) {
+async function computeAndStore(sessionId, projectId, siteId, clientIp, uaHints) {
   // Fetch all events for the session, ordered by timestamp
   const { rows: events } = await pool.query(
     `SELECT type, data, ts FROM events
@@ -39,6 +42,12 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp) {
   // features map so it lands in the same UPSERT.
   if (clientIp) {
     Object.assign(features, geoip.lookup(clientIp));
+  }
+
+  // UA Client Hints (parsed by route handler, passed pre-computed here
+  // so computeAndStore doesn't need access to request.headers).
+  if (uaHints) {
+    Object.assign(features, uaHints);
   }
 
   // Build the upsert query dynamically from the features object
@@ -82,6 +91,10 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp) {
     "perf_ttfb", "perf_dom_interactive", "perf_dom_content_loaded",
     "perf_load_event", "perf_transfer_size",
     "perf_long_task_count", "perf_long_task_total_ms",
+    // UA Client Hints (added 2026-04-10, parsed from Sec-CH-UA-* request headers)
+    "uah_brand", "uah_brand_version", "uah_mobile",
+    "uah_platform", "uah_platform_version",
+    "uah_model", "uah_arch", "uah_bitness",
     "cross_visit_number", "cross_return_24h", "cross_return_7d",
     "event_count",
     "bot_score", "bot_risk_level", "bot_signals", "is_bot",

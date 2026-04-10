@@ -198,16 +198,18 @@ function lookup(ip) {
     asnRow = null;
   }
 
-  // The ip-location-db MMDBs use the same flat record shape regardless of
-  // source (documented in the repo README). Field names reflect the CSV
-  // column layout: `country`, `state1` (region), `city`, `timezone`,
-  // `latitude`, `longitude`, `autonomous_system_number`, `autonomous_system_organization`.
-  const orgName = asnRow?.autonomous_system_organization ?? null;
+  // Field names from the ip-location-db MMDB binary shape (verified on prod):
+  //   city reader: { country_code, state1, state2, city, postcode, latitude, longitude, timezone }
+  //   asn  reader: { autonomous_system_number, autonomous_system_organization }
+  // Note: `timezone` from dbip-city is usually empty — we have ctx_timezone
+  // from the client for that. Empty strings are normalized to null so
+  // dashboard queries don't need to handle two flavors of "missing".
+  const orgName = nonEmptyOrNull(asnRow?.autonomous_system_organization);
   return {
-    geo_country: cityRow?.country ?? null,
-    geo_region: cityRow?.state1 ?? null,
-    geo_city: cityRow?.city ?? null,
-    geo_timezone: cityRow?.timezone ?? null,
+    geo_country: nonEmptyOrNull(cityRow?.country_code),
+    geo_region: nonEmptyOrNull(cityRow?.state1),
+    geo_city: nonEmptyOrNull(cityRow?.city),
+    geo_timezone: nonEmptyOrNull(cityRow?.timezone),
     geo_latitude: typeof cityRow?.latitude === "number" ? cityRow.latitude : null,
     geo_longitude: typeof cityRow?.longitude === "number" ? cityRow.longitude : null,
     geo_asn: typeof asnRow?.autonomous_system_number === "number"
@@ -217,6 +219,13 @@ function lookup(ip) {
     geo_is_datacenter: orgName ? matchesAny(orgName, DATACENTER_KEYWORDS) : null,
     geo_is_mobile_carrier: orgName ? matchesAny(orgName, MOBILE_CARRIER_KEYWORDS) : null,
   };
+}
+
+/** Return null for nullish or empty-string values, otherwise the value itself. */
+function nonEmptyOrNull(v) {
+  if (v == null) return null;
+  if (typeof v === "string" && v.length === 0) return null;
+  return v;
 }
 
 module.exports = {

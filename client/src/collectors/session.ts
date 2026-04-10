@@ -20,6 +20,10 @@ export class SessionCollector implements Collector {
   private lastNavTime = 0;
   private sessionStart = 0;
   private summaryEmitted = false;
+  private earlySnapshotTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Delay before the first (early) session snapshot is emitted. */
+  private static readonly EARLY_SNAPSHOT_MS = 3000;
 
   constructor(tracker: SurfaiTracker) {
     this.tracker = tracker;
@@ -36,19 +40,41 @@ export class SessionCollector implements Collector {
     // Monkey-patch pushState/replaceState for SPA support
     this.patchHistory("pushState");
     this.patchHistory("replaceState");
+
+    // Emit an early snapshot after 3s so that even bounce sessions that
+    // close before any lifecycle event fires still get a session record
+    // via the regular 5s flushInterval. beforeFlush() on final unload
+    // will push a second, more accurate snapshot — the server-side
+    // extractor uses the latest one anyway.
+    this.earlySnapshotTimer = setTimeout(() => {
+      this.emitSnapshot();
+    }, SessionCollector.EARLY_SNAPSHOT_MS);
   }
 
   stop(): void {
     window.removeEventListener("popstate", this.onNavigation);
+    if (this.earlySnapshotTimer !== null) {
+      clearTimeout(this.earlySnapshotTimer);
+      this.earlySnapshotTimer = null;
+    }
   }
 
   /**
    * Called by tracker right before the buffer is drained on page hide /
-   * unload / stop. Pushes a single session summary event so it lands in
-   * the same beacon as the rest of the buffered data. Idempotent — only
-   * the first call per tracker lifetime emits.
+   * unload / stop. Pushes a final session summary event so it lands in
+   * the same beacon as the rest of the buffered data.
    */
   beforeFlush(): void {
+    this.emitSnapshot();
+  }
+
+  /**
+   * Push a session summary with the latest known state. Called both from
+   * the 3s early-snapshot timer (to cover bounce sessions) and from
+   * beforeFlush() on final unload. Idempotent — only the first call per
+   * tracker lifetime actually pushes.
+   */
+  private emitSnapshot(): void {
     if (this.summaryEmitted) return;
     this.summaryEmitted = true;
 

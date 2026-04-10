@@ -146,8 +146,15 @@ export class SurfaiTracker {
     document.addEventListener("keydown", this.resetIdle);
     document.addEventListener("click", this.resetIdle);
 
-    // sendBeacon fallback for page unload
+    // sendBeacon fallback for page unload. We listen to THREE events because
+    // no single one is reliable across browsers:
+    //   - visibilitychange('hidden'): fires when tab goes to background (mobile primary)
+    //   - pagehide: fires on navigation/close including bfcache (Safari/iOS primary)
+    //   - beforeunload: legacy desktop fallback
+    // All three funnel through the same handler, which is idempotent via
+    // this.unloading so the final flush only happens once.
     document.addEventListener("visibilitychange", this.onVisibilityChange);
+    window.addEventListener("pagehide", this.onPageHide);
     window.addEventListener("beforeunload", this.onBeforeUnload);
 
     this.idleTimer = setInterval(this.checkIdle, 1_000);
@@ -186,6 +193,7 @@ export class SurfaiTracker {
     document.removeEventListener("keydown", this.resetIdle);
     document.removeEventListener("click", this.resetIdle);
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
+    window.removeEventListener("pagehide", this.onPageHide);
     window.removeEventListener("beforeunload", this.onBeforeUnload);
 
     if (this.idleTimer) clearInterval(this.idleTimer);
@@ -419,18 +427,30 @@ export class SurfaiTracker {
     }
   }
 
-  private onVisibilityChange = (): void => {
-    if (document.visibilityState === "hidden") {
-      this.unloading = true;
-      this.runBeforeFlushHooks();
-      this.flushBeacon();
-    }
-  };
-
-  private onBeforeUnload = (): void => {
+  /**
+   * Shared final-flush path used by all three unload listeners.
+   * Idempotent via this.unloading so repeated lifecycle events do not
+   * re-emit collector summaries or double-flush.
+   */
+  private finalFlush(): void {
+    if (this.unloading) return;
     this.unloading = true;
     this.runBeforeFlushHooks();
     this.flushBeacon();
+  }
+
+  private onVisibilityChange = (): void => {
+    if (document.visibilityState === "hidden") {
+      this.finalFlush();
+    }
+  };
+
+  private onPageHide = (): void => {
+    this.finalFlush();
+  };
+
+  private onBeforeUnload = (): void => {
+    this.finalFlush();
   };
 
   // --- Flush ---------------------------------------------------------------

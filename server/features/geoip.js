@@ -1,0 +1,223 @@
+"use strict";
+
+/**
+ * GeoIP enrichment module.
+ *
+ * Looks up country / region / city / ASN / ASN organization for a client IP
+ * using MMDB files from the ip-location-db project (DB-IP Lite + RouteViews,
+ * CC BY 4.0 — see attribution requirement in CLAUDE.md).
+ *
+ * Design:
+ *   - Singleton: the MMDB readers are loaded once at server startup.
+ *   - Fail-safe: if the MMDB packages are not installed or the files are
+ *     missing, lookup() returns null and the server keeps working. This
+ *     lets the SDK ingest path be unaffected if geoip setup is incomplete.
+ *   - Synchronous: `maxmind.openSync()` loads the file once; subsequent
+ *     `.get()` calls are in-memory and take <1ms.
+ *   - Privacy: the caller (persistBatch) is responsible for NOT storing
+ *     the raw IP anywhere. This module only returns derived fields.
+ *
+ * Data providers:
+ *   - @ip-location-db/dbip-city-mmdb (CC BY 4.0 by DB-IP.com)
+ *     Fields: country, region, city, latitude, longitude, timezone
+ *   - @ip-location-db/asn-mmdb (CC BY 4.0 by RouteViews + DB-IP)
+ *     Fields: autonomous_system_number, autonomous_system_organization
+ */
+
+let cityReaderV4 = null;
+let cityReaderV6 = null;
+let asnReaderV4 = null;
+let asnReaderV6 = null;
+let initialized = false;
+let available = false;
+
+// Heuristic keyword lists for ASN classification. These are checked against
+// the `autonomous_system_organization` string (case-insensitive) to derive
+// boolean features useful for bot detection. Not exhaustive — the goal is
+// high-precision hits on common datacenters and mobile carriers, not full
+// coverage.
+const DATACENTER_KEYWORDS = [
+  "amazon", "aws", "google", "microsoft", "azure", "digitalocean",
+  "linode", "ovh", "hetzner", "scaleway", "vultr", "hostinger",
+  "godaddy", "namecheap", "cloudflare", "fastly", "akamai",
+  "alibaba", "tencent", "oracle", "ibm", "rackspace", "leaseweb",
+  "contabo", "datacamp", "choopa", "m247", "timeweb", "selectel",
+  "reg.ru", "beget", "masterhost", "ruvds", "firstvds", "serverel",
+  "hosting", "datacenter", "data center", "cloud", "vps", "dedicated",
+];
+
+const MOBILE_CARRIER_KEYWORDS = [
+  "mts", "mobile tele", "beeline", "vimpelcom", "megafon",
+  "tele2", "yota",
+  "mobile", "cellular", "wireless", "telecom", "vodafone",
+  "t-mobile", "verizon", "at&t", "orange", "telefonica",
+  "kddi", "ntt", "softbank", "docomo",
+];
+
+/**
+ * Load the MMDB readers. Called once at startup. Safe to call multiple times.
+ * Never throws — logs a warning and leaves the module in a disabled state
+ * if the packages or files are unavailable.
+ *
+ * @param {object} [logger] - Optional Pino-compatible logger for startup messages
+ * @returns {boolean} true if all four readers loaded successfully
+ */
+function init(logger) {
+  if (initialized) return available;
+  initialized = true;
+
+  const log = logger || console;
+
+  let maxmind;
+  try {
+    maxmind = require("maxmind");
+  } catch (_err) {
+    log.warn("geoip: maxmind package not installed — enrichment disabled");
+    return false;
+  }
+
+  // Resolve package paths without crashing if they're not installed.
+  let cityV4Path, cityV6Path, asnV4Path, asnV6Path;
+  try {
+    cityV4Path = require.resolve("@ip-location-db/dbip-city-mmdb/dbip-city-ipv4.mmdb");
+    cityV6Path = require.resolve("@ip-location-db/dbip-city-mmdb/dbip-city-ipv6.mmdb");
+  } catch (_err) {
+    log.warn("geoip: @ip-location-db/dbip-city-mmdb not installed — city enrichment disabled");
+    return false;
+  }
+  try {
+    asnV4Path = require.resolve("@ip-location-db/asn-mmdb/asn-ipv4.mmdb");
+    asnV6Path = require.resolve("@ip-location-db/asn-mmdb/asn-ipv6.mmdb");
+  } catch (_err) {
+    log.warn("geoip: @ip-location-db/asn-mmdb not installed — ASN enrichment disabled");
+    return false;
+  }
+
+  try {
+    cityReaderV4 = maxmind.openSync(cityV4Path);
+    cityReaderV6 = maxmind.openSync(cityV6Path);
+    asnReaderV4 = maxmind.openSync(asnV4Path);
+    asnReaderV6 = maxmind.openSync(asnV6Path);
+  } catch (err) {
+    log.warn({ err }, "geoip: failed to open MMDB files — enrichment disabled");
+    cityReaderV4 = cityReaderV6 = asnReaderV4 = asnReaderV6 = null;
+    return false;
+  }
+
+  available = true;
+  log.info("geoip: MMDB readers initialized (dbip-city + asn)");
+  return true;
+}
+
+/** True if init() succeeded and lookup() can return real data. */
+function isAvailable() {
+  return available;
+}
+
+/**
+ * Check whether an ASN organization name matches any of the given keywords
+ * (case-insensitive substring match).
+ */
+function matchesAny(orgName, keywords) {
+  if (!orgName) return false;
+  const lower = orgName.toLowerCase();
+  for (const kw of keywords) {
+    if (lower.includes(kw)) return true;
+  }
+  return false;
+}
+
+/**
+ * Decide whether to use the IPv4 or IPv6 reader for a given IP string.
+ * Returns the appropriate reader pair or nulls.
+ */
+function pickReaders(ip) {
+  if (!ip || typeof ip !== "string") return { city: null, asn: null };
+  const isIpv6 = ip.includes(":");
+  return {
+    city: isIpv6 ? cityReaderV6 : cityReaderV4,
+    asn: isIpv6 ? asnReaderV6 : asnReaderV4,
+  };
+}
+
+/**
+ * Look up geo/ASN data for a client IP. Returns a flat object with all
+ * fields nullable, or an object of nulls if the lookup fails.
+ *
+ * Never throws — callers can safely merge the result into a features object.
+ *
+ * @param {string} ip - Client IPv4 or IPv6 address (as returned by request.ip)
+ * @returns {{
+ *   geo_country: string|null,
+ *   geo_region: string|null,
+ *   geo_city: string|null,
+ *   geo_timezone: string|null,
+ *   geo_latitude: number|null,
+ *   geo_longitude: number|null,
+ *   geo_asn: number|null,
+ *   geo_asn_org: string|null,
+ *   geo_is_datacenter: boolean|null,
+ *   geo_is_mobile_carrier: boolean|null
+ * }}
+ */
+function lookup(ip) {
+  const empty = {
+    geo_country: null,
+    geo_region: null,
+    geo_city: null,
+    geo_timezone: null,
+    geo_latitude: null,
+    geo_longitude: null,
+    geo_asn: null,
+    geo_asn_org: null,
+    geo_is_datacenter: null,
+    geo_is_mobile_carrier: null,
+  };
+
+  if (!available || !ip) return empty;
+
+  const { city, asn } = pickReaders(ip);
+
+  let cityRow = null;
+  let asnRow = null;
+  try {
+    if (city) cityRow = city.get(ip);
+  } catch (_err) {
+    cityRow = null;
+  }
+  try {
+    if (asn) asnRow = asn.get(ip);
+  } catch (_err) {
+    asnRow = null;
+  }
+
+  // The ip-location-db MMDBs use the same flat record shape regardless of
+  // source (documented in the repo README). Field names reflect the CSV
+  // column layout: `country`, `state1` (region), `city`, `timezone`,
+  // `latitude`, `longitude`, `autonomous_system_number`, `autonomous_system_organization`.
+  const orgName = asnRow?.autonomous_system_organization ?? null;
+  return {
+    geo_country: cityRow?.country ?? null,
+    geo_region: cityRow?.state1 ?? null,
+    geo_city: cityRow?.city ?? null,
+    geo_timezone: cityRow?.timezone ?? null,
+    geo_latitude: typeof cityRow?.latitude === "number" ? cityRow.latitude : null,
+    geo_longitude: typeof cityRow?.longitude === "number" ? cityRow.longitude : null,
+    geo_asn: typeof asnRow?.autonomous_system_number === "number"
+      ? asnRow.autonomous_system_number
+      : null,
+    geo_asn_org: orgName,
+    geo_is_datacenter: orgName ? matchesAny(orgName, DATACENTER_KEYWORDS) : null,
+    geo_is_mobile_carrier: orgName ? matchesAny(orgName, MOBILE_CARRIER_KEYWORDS) : null,
+  };
+}
+
+module.exports = {
+  init,
+  isAvailable,
+  lookup,
+  // Exported for tests
+  _matchesAny: matchesAny,
+  _DATACENTER_KEYWORDS: DATACENTER_KEYWORDS,
+  _MOBILE_CARRIER_KEYWORDS: MOBILE_CARRIER_KEYWORDS,
+};

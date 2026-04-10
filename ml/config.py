@@ -62,6 +62,10 @@ NUMERIC_FEATURES = [
     "ctx_dpr",
     "ctx_hardware_concurrency",
     "ctx_device_memory",
+    # GeoIP enrichment (added 2026-04-10)
+    "geo_latitude",
+    "geo_longitude",
+    "geo_asn",
     "cross_visit_number",
     "bot_score",
 ]
@@ -75,6 +79,9 @@ BOOLEAN_FEATURES = [
     "is_bot",
     # Extended context
     "ctx_reduced_motion",
+    # GeoIP enrichment
+    "geo_is_datacenter",
+    "geo_is_mobile_carrier",
 ]
 
 CATEGORICAL_FEATURES = [
@@ -93,6 +100,12 @@ CATEGORICAL_FEATURES = [
     "ctx_utm_campaign",
     "ctx_utm_term",
     "ctx_utm_content",
+    # GeoIP enrichment (added 2026-04-10)
+    "geo_country",
+    "geo_region",
+    "geo_city",
+    "geo_timezone",
+    "geo_asn_org",
 ]
 
 JSONB_WINDOW_COLUMNS = [

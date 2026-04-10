@@ -3,6 +3,7 @@
 const { pool } = require("../db");
 const { extractAllFeatures } = require("./extractors");
 const { calculateBotScore } = require("./bot-scoring");
+const geoip = require("./geoip");
 
 /**
  * Fetch all events for a session from the database, compute features,
@@ -11,9 +12,11 @@ const { calculateBotScore } = require("./bot-scoring");
  * @param {string} sessionId
  * @param {string} [projectId]
  * @param {string} [siteId]
+ * @param {string} [clientIp] - Client IP for GeoIP enrichment. NOT stored
+ *   anywhere; only the lookup result is persisted into geo_* columns.
  * @returns {object} computed features
  */
-async function computeAndStore(sessionId, projectId, siteId) {
+async function computeAndStore(sessionId, projectId, siteId, clientIp) {
   // Fetch all events for the session, ordered by timestamp
   const { rows: events } = await pool.query(
     `SELECT type, data, ts FROM events
@@ -30,6 +33,13 @@ async function computeAndStore(sessionId, projectId, siteId) {
   const botSignalEvents = events.filter((e) => e.type === "bot_signals");
   const botResult = calculateBotScore(features, botSignalEvents);
   Object.assign(features, botResult);
+
+  // GeoIP enrichment. Returns an object of nulls if the readers are not
+  // loaded or the lookup fails — never throws. Merged directly into the
+  // features map so it lands in the same UPSERT.
+  if (clientIp) {
+    Object.assign(features, geoip.lookup(clientIp));
+  }
 
   // Build the upsert query dynamically from the features object
   const columns = [];
@@ -61,6 +71,11 @@ async function computeAndStore(sessionId, projectId, siteId) {
     "ctx_referrer_host",
     "ctx_utm_source", "ctx_utm_medium", "ctx_utm_campaign",
     "ctx_utm_term", "ctx_utm_content",
+    // GeoIP enrichment (added 2026-04-10, populated at ingest from client IP)
+    "geo_country", "geo_region", "geo_city", "geo_timezone",
+    "geo_latitude", "geo_longitude",
+    "geo_asn", "geo_asn_org",
+    "geo_is_datacenter", "geo_is_mobile_carrier",
     "cross_visit_number", "cross_return_24h", "cross_return_7d",
     "event_count",
     "bot_score", "bot_risk_level", "bot_signals", "is_bot",

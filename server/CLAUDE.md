@@ -68,6 +68,16 @@ Any schema change — adding a field, adding a new event `type`, changing an enu
 | `ALLOW_INGEST_WITHOUT_SITEKEY` | `false` | Set `true` for local dev without siteKey setup |
 | `LOG_LEVEL` | `info` | Pino log level |
 
+## GeoIP enrichment
+
+`server/features/geoip.js` is a singleton initialized at startup via `geoip.init(fastify.log)`. It loads MMDB files from `@ip-location-db/dbip-city-mmdb` and `@ip-location-db/asn-mmdb` once and exposes a sync `lookup(ip)` method. The ingest route captures `request.ip` and passes it to `computeAndStore(sessionId, projectId, siteId, clientIp)`, which merges the lookup result (country/region/city/timezone/lat-long/ASN/org/is_datacenter/is_mobile_carrier) into `session_features` in the same UPSERT as behavioral features.
+
+**Privacy:** the raw IP is read once from `request.ip` and discarded when the handler returns. It is never written to `events`, `raw_batches`, or anywhere else. Only the derived `geo_*` columns persist.
+
+**`trustProxy: "127.0.0.1"`** is set on the Fastify instance so `request.ip` resolves via `X-Forwarded-For` from the local nginx rather than returning `127.0.0.1`. Do not widen `trustProxy` to accept arbitrary proxies — IP spoofing risk.
+
+**Graceful degradation:** if the MMDB packages are not installed (e.g. during local dev), `init()` logs a warning and `lookup()` returns an object of nulls. Ingest keeps working.
+
 ## Security
 
 - **Operator auth**: All operator/dashboard API routes require `Authorization: Bearer <OPERATOR_API_TOKEN>`. SSE endpoint also accepts `?token=` query param (EventSource limitation). Ingest `POST /api/events` remains public.

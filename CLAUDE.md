@@ -239,6 +239,16 @@ Two config files manage MCP servers for the two agents:
 
 When adding or removing MCP servers, update **both** config files if the server is shared.
 
+## GeoIP Enrichment
+
+Starting 2026-04-10, the ingest path looks up the client IP against local MMDB files at `session_features` UPSERT time and writes the derived `geo_*` columns (country, region, city, timezone, lat/long, ASN, ASN org, `is_datacenter`, `is_mobile_carrier`). The raw IP is **never stored** — it lives only in `request.ip` for the duration of the ingest handler.
+
+- Module: `server/features/geoip.js` — singleton, initialized once in `server.js` startup via `geoip.init(fastify.log)`.
+- Data: `@ip-location-db/dbip-city-mmdb` (CC BY 4.0 by DB-IP, monthly) + `@ip-location-db/asn-mmdb` (CC BY 4.0 by RouteViews + DB-IP, daily). Read via `maxmind` npm package.
+- Attribution requirement (CC BY 4.0): when the dashboard or cabinet renders geo data, it must include a visible link to `https://db-ip.com/` (TODO — not yet wired).
+- `trustProxy: "127.0.0.1"` is set on the Fastify instance so `request.ip` resolves to the real client IP via `X-Forwarded-For` from nginx.
+- Graceful degradation: if the MMDB packages are not installed or files are missing, `geoip.init()` logs a warning and `lookup()` returns all-null objects. Ingest keeps working.
+
 ## Security Rules
 
 - Never commit `.env`, credentials, or API keys.

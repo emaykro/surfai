@@ -39,10 +39,19 @@ alwaysApply: false
 
 ## Feature Engineering Pipeline
 
-- `server/features/extractors.js` — modular extractors for each event type (mouse, scroll, click, form, engagement, session, context, cross_session).
-- `server/features/store.js` — `computeAndStore(sessionId)` fetches all events, extracts features, upserts into `session_features`.
-- `server/features/backfill.js` — batch backfill script for existing sessions (`npm run backfill`).
+- `server/features/extractors.js` — modular extractors for each event type (mouse, scroll, click, form, engagement, session, context, cross_session, bot_signals).
+- `server/features/store.js` — `computeAndStore(sessionId, projectId, siteId, clientIp)` fetches all events, extracts behavioral features, runs bot scoring, merges GeoIP lookup, and upserts into `session_features`.
+- `server/features/geoip.js` — singleton MMDB reader (`dbip-city` + `asn` from `@ip-location-db`). Initialized once in `server.js` startup. `lookup(ip)` returns `{geo_country, geo_region, geo_city, geo_timezone, geo_latitude, geo_longitude, geo_asn, geo_asn_org, geo_is_datacenter, geo_is_mobile_carrier}` or all-null if not initialized.
+- `server/features/backfill.js` — batch backfill script for existing sessions (`npm run backfill`). Does NOT pass an IP — historical sessions keep `geo_*` NULL forever.
 - Features are recomputed on every batch arrival (fire-and-forget after persistence + SSE broadcast).
 - `GET /api/sessions/:sessionId/features` — returns computed ML feature vector for a session.
 - Migration 004: `session_features` table with mouse dynamics, scroll behavior, click patterns, form behavior, engagement, session-level, context, and cross-session features.
+- Migration 010 added extended context columns (timezone, viewport, dpr, hardware, utm, ...). Migration 011 added GeoIP columns.
 - Sliding-window aggregation stored as JSONB (1s, 5s, 30s windows for mouse velocity).
+
+## GeoIP & Client IP Handling
+
+- The Fastify instance is configured with `trustProxy: "127.0.0.1"` so `request.ip` reflects the real client IP via `X-Forwarded-For` from the local nginx. Do NOT widen this to trust arbitrary proxies.
+- The client IP is read once inside the `POST /api/events` handler as `request.ip`, passed to `computeAndStore()`, and discarded when the handler returns. It is NEVER persisted in `events`, `raw_batches`, or any other table. Only derived `geo_*` columns on `session_features` persist.
+- The GeoIP module must degrade gracefully when MMDB packages are missing (local dev): log a startup warning, return all-null objects from `lookup()`, and keep the ingest path working.
+- Attribution (CC BY 4.0 from DB-IP): dashboards and cabinets rendering geo data must include a visible link to `https://db-ip.com/`. TODO as of 2026-04-10.

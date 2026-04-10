@@ -7,6 +7,11 @@ const fastify = require("fastify")({
     redact: ["req.headers.authorization"],
   },
   bodyLimit: 256 * 1024, // 256 KB — fits SDK contract (100 events × ~64KB max)
+  // Trust nginx on localhost so that request.ip resolves to the real
+  // client IP via X-Forwarded-For instead of 127.0.0.1. This is required
+  // for GeoIP enrichment in persistBatch. Only the loopback address is
+  // trusted — nginx is the only thing fronting Fastify.
+  trustProxy: "127.0.0.1",
 });
 const { pool } = require("./db");
 
@@ -38,6 +43,7 @@ fastify.addHook("onSend", async (_request, reply, payload) => {
   return payload;
 });
 const { computeAndStore } = require("./features/store");
+const geoip = require("./features/geoip");
 
 // ---------------------------------------------------------------------------
 // CORS — explicit origins; never open `*` in production
@@ -471,6 +477,11 @@ fastify.post(
 
     fastify.log.info({ sessionId, projectId, siteId, eventCount: events.length, hasSiteKey: !!siteKey }, "batch received");
 
+    // Capture the client IP for GeoIP enrichment. This is the ONLY place
+    // the raw IP is read — it must not be stored in events or raw_batches,
+    // only passed to computeAndStore for one-shot lookup.
+    const clientIp = request.ip;
+
     // Respond immediately — DB write must not block the client
     reply.send({ ok: true });
 
@@ -478,8 +489,10 @@ fastify.post(
     persistBatch(sessionId, sentAt, events, projectId, siteId)
       .then(() => {
         broadcastSSE({ sessionId, sentAt, events, projectId });
-        // Recompute features after new data is persisted
-        return computeAndStore(sessionId, projectId, siteId);
+        // Recompute features after new data is persisted. clientIp is
+        // passed through so the GeoIP lookup result lands in session_features
+        // in the same UPSERT as the behavioral features.
+        return computeAndStore(sessionId, projectId, siteId, clientIp);
       })
       .then(() => {
         fastify.log.debug({ sessionId }, "features recomputed");
@@ -1177,6 +1190,10 @@ const PORT = parseInt(process.env.PORT, 10) || 3000;
 fastify.addHook("onClose", async () => {
   await pool.end();
 });
+
+// Load GeoIP MMDB readers once at startup (optional — server keeps working
+// without them, just with NULL geo_* columns on session_features).
+geoip.init(fastify.log);
 
 fastify.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {

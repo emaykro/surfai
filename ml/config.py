@@ -54,6 +54,14 @@ NUMERIC_FEATURES = [
     "session_avg_nav_speed",
     "ctx_screen_w",
     "ctx_screen_h",
+    # Extended context (added 2026-04-10)
+    "ctx_tz_offset",
+    "ctx_language_count",
+    "ctx_viewport_w",
+    "ctx_viewport_h",
+    "ctx_dpr",
+    "ctx_hardware_concurrency",
+    "ctx_device_memory",
     "cross_visit_number",
     "bot_score",
 ]
@@ -65,6 +73,8 @@ BOOLEAN_FEATURES = [
     "cross_return_24h",
     "cross_return_7d",
     "is_bot",
+    # Extended context
+    "ctx_reduced_motion",
 ]
 
 CATEGORICAL_FEATURES = [
@@ -74,6 +84,15 @@ CATEGORICAL_FEATURES = [
     "ctx_browser",
     "ctx_os",
     "ctx_connection_type",
+    # Extended context (added 2026-04-10)
+    "ctx_timezone",
+    "ctx_color_scheme",
+    "ctx_referrer_host",
+    "ctx_utm_source",
+    "ctx_utm_medium",
+    "ctx_utm_campaign",
+    "ctx_utm_term",
+    "ctx_utm_content",
 ]
 
 JSONB_WINDOW_COLUMNS = [

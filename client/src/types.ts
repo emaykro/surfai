@@ -66,6 +66,25 @@ export interface ContextEventData {
   screenH: number;
   language: string;
   connectionType: string;   // "4g" | "3g" | "2g" | "slow-2g" | "unknown"
+  // Extended fields (added 2026-04-10). All optional on the server side so
+  // that old cached bundles still pass schema validation; the current SDK
+  // always populates them.
+  timezone?: string;            // IANA zone, e.g. "Europe/Moscow"
+  timezoneOffset?: number;      // minutes from UTC (JS convention)
+  languages?: string[];         // full accept-language list
+  viewportW?: number;           // window.innerWidth (CSS px)
+  viewportH?: number;           // window.innerHeight (CSS px)
+  devicePixelRatio?: number;
+  colorScheme?: string;         // "light" | "dark" | "no-preference"
+  reducedMotion?: boolean;
+  hardwareConcurrency?: number; // logical CPU cores
+  deviceMemory?: number;        // GB bucket per W3C spec
+  referrerHost?: string;        // host of document.referrer
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmTerm?: string;
+  utmContent?: string;
   ts: number;
 }
 

@@ -133,6 +133,56 @@ describe("ContextCollector", () => {
 
     tracker.stop();
   });
+
+  it("emits extended context fields (timezone, viewport, dpr, utm, hardware, ...)", async () => {
+    // Seed URL with UTM params so the collector picks them up
+    const originalHref = window.location.href;
+    const urlWithUtm = new URL(window.location.href);
+    urlWithUtm.searchParams.set("utm_source", "yandex");
+    urlWithUtm.searchParams.set("utm_medium", "cpc");
+    urlWithUtm.searchParams.set("utm_campaign", "spring_sale");
+    window.history.replaceState({}, "", urlWithUtm.toString());
+
+    try {
+      const tracker = createTracker();
+      const ctx = new ContextCollector(tracker);
+      tracker.addCollector(ctx);
+      tracker.start();
+
+      await tracker.flush();
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      const ctxEvents = body.events.filter((e: { type: string }) => e.type === "context");
+      expect(ctxEvents.length).toBe(1);
+
+      const data = ctxEvents[0].data;
+
+      // Extended fields should all be present with correct types
+      expect(data.timezone).toBeTypeOf("string");
+      expect(data.timezoneOffset).toBeTypeOf("number");
+      expect(Array.isArray(data.languages)).toBe(true);
+      expect(data.viewportW).toBeTypeOf("number");
+      expect(data.viewportH).toBeTypeOf("number");
+      expect(data.devicePixelRatio).toBeTypeOf("number");
+      expect(typeof data.colorScheme).toBe("string");
+      expect(typeof data.reducedMotion).toBe("boolean");
+      expect(data.hardwareConcurrency).toBeTypeOf("number");
+      expect(data.deviceMemory).toBeTypeOf("number");
+      expect(typeof data.referrerHost).toBe("string");
+
+      // UTM fields picked up from the URL
+      expect(data.utmSource).toBe("yandex");
+      expect(data.utmMedium).toBe("cpc");
+      expect(data.utmCampaign).toBe("spring_sale");
+      expect(data.utmTerm).toBe("");
+      expect(data.utmContent).toBe("");
+
+      tracker.stop();
+    } finally {
+      window.history.replaceState({}, "", originalHref);
+    }
+  });
 });
 
 describe("CrossSessionCollector", () => {

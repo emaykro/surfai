@@ -256,6 +256,9 @@ const sessionDataSchema = {
 
 const contextDataSchema = {
   type: "object",
+  // Extended fields added 2026-04-10 are NOT in `required` so that cached
+  // pre-extension bundles still pass validation. The current SDK always
+  // populates them.
   required: ["trafficSource", "deviceType", "browser", "os", "screenW", "screenH", "language", "connectionType", "ts"],
   additionalProperties: false,
   properties: {
@@ -267,6 +270,23 @@ const contextDataSchema = {
     screenH: { type: "number" },
     language: { type: "string" },
     connectionType: { type: "string" },
+    // Extended fields (optional)
+    timezone: { type: "string" },
+    timezoneOffset: { type: "number" },
+    languages: { type: "array", items: { type: "string" } },
+    viewportW: { type: "number" },
+    viewportH: { type: "number" },
+    devicePixelRatio: { type: "number" },
+    colorScheme: { type: "string" },
+    reducedMotion: { type: "boolean" },
+    hardwareConcurrency: { type: "number" },
+    deviceMemory: { type: "number" },
+    referrerHost: { type: "string" },
+    utmSource: { type: "string" },
+    utmMedium: { type: "string" },
+    utmCampaign: { type: "string" },
+    utmTerm: { type: "string" },
+    utmContent: { type: "string" },
     ts: { type: "number" },
   },
 };

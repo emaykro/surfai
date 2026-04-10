@@ -392,6 +392,9 @@ function extractContext(events) {
   // Use the first context event (set once per session)
   const first = events[0].data;
 
+  // languages may be missing on cached pre-extension bundles
+  const langCount = Array.isArray(first.languages) ? first.languages.length : null;
+
   return {
     ctx_traffic_source: first.trafficSource,
     ctx_device_type: first.deviceType,
@@ -400,6 +403,23 @@ function extractContext(events) {
     ctx_screen_w: first.screenW,
     ctx_screen_h: first.screenH,
     ctx_connection_type: first.connectionType,
+    // Extended fields (all nullable — older bundles don't emit them)
+    ctx_timezone: first.timezone ?? null,
+    ctx_tz_offset: first.timezoneOffset ?? null,
+    ctx_language_count: langCount,
+    ctx_viewport_w: first.viewportW ?? null,
+    ctx_viewport_h: first.viewportH ?? null,
+    ctx_dpr: first.devicePixelRatio ?? null,
+    ctx_color_scheme: first.colorScheme ?? null,
+    ctx_reduced_motion: typeof first.reducedMotion === "boolean" ? first.reducedMotion : null,
+    ctx_hardware_concurrency: first.hardwareConcurrency ?? null,
+    ctx_device_memory: first.deviceMemory ?? null,
+    ctx_referrer_host: first.referrerHost ?? null,
+    ctx_utm_source: first.utmSource ?? null,
+    ctx_utm_medium: first.utmMedium ?? null,
+    ctx_utm_campaign: first.utmCampaign ?? null,
+    ctx_utm_term: first.utmTerm ?? null,
+    ctx_utm_content: first.utmContent ?? null,
   };
 }
 

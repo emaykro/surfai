@@ -6,6 +6,18 @@ import {
   detectBrowser,
   detectOS,
   getConnectionType,
+  getTimezone,
+  getTimezoneOffset,
+  getLanguages,
+  getViewportWidth,
+  getViewportHeight,
+  getDevicePixelRatio,
+  getColorScheme,
+  getReducedMotion,
+  getHardwareConcurrency,
+  getDeviceMemory,
+  getReferrerHost,
+  getUtmParams,
   now,
 } from "../helpers.js";
 
@@ -28,6 +40,7 @@ export class ContextCollector implements Collector {
     // and deferring via requestIdleCallback caused bounce sessions to unload before
     // the callback fired, dropping context for ~95% of traffic.
     try {
+      const utm = getUtmParams();
       this.tracker.pushEvent({
         type: "context",
         data: {
@@ -39,6 +52,23 @@ export class ContextCollector implements Collector {
           screenH: window.screen.height,
           language: navigator.language || "unknown",
           connectionType: getConnectionType(),
+          // Extended fields (added 2026-04-10)
+          timezone: getTimezone(),
+          timezoneOffset: getTimezoneOffset(),
+          languages: getLanguages(),
+          viewportW: getViewportWidth(),
+          viewportH: getViewportHeight(),
+          devicePixelRatio: getDevicePixelRatio(),
+          colorScheme: getColorScheme(),
+          reducedMotion: getReducedMotion(),
+          hardwareConcurrency: getHardwareConcurrency(),
+          deviceMemory: getDeviceMemory(),
+          referrerHost: getReferrerHost(),
+          utmSource: utm.utmSource,
+          utmMedium: utm.utmMedium,
+          utmCampaign: utm.utmCampaign,
+          utmTerm: utm.utmTerm,
+          utmContent: utm.utmContent,
           ts: now(),
         },
       });

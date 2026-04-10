@@ -114,6 +114,23 @@ const contextDataSchema = {
     screenH: { type: "number" },
     language: { type: "string" },
     connectionType: { type: "string" },
+    // Extended fields (added 2026-04-10) — optional on validation
+    timezone: { type: "string" },
+    timezoneOffset: { type: "number" },
+    languages: { type: "array", items: { type: "string" } },
+    viewportW: { type: "number" },
+    viewportH: { type: "number" },
+    devicePixelRatio: { type: "number" },
+    colorScheme: { type: "string" },
+    reducedMotion: { type: "boolean" },
+    hardwareConcurrency: { type: "number" },
+    deviceMemory: { type: "number" },
+    referrerHost: { type: "string" },
+    utmSource: { type: "string" },
+    utmMedium: { type: "string" },
+    utmCampaign: { type: "string" },
+    utmTerm: { type: "string" },
+    utmContent: { type: "string" },
     ts: { type: "number" },
   },
 };
@@ -254,6 +271,42 @@ describe("POST /api/events — Phase 2 event types", () => {
   it("accepts valid context event", async () => {
     const res = await inject(validPayload({
       events: [{ type: "context", data: { trafficSource: "organic", deviceType: "desktop", browser: "Chrome", os: "macOS", screenW: 1920, screenH: 1080, language: "en", connectionType: "4g", ts } }],
+    }));
+    assert.equal(res.statusCode, 200);
+  });
+
+  it("accepts context event with extended fields (timezone, viewport, utm, hardware)", async () => {
+    const res = await inject(validPayload({
+      events: [{
+        type: "context",
+        data: {
+          trafficSource: "paid",
+          deviceType: "mobile",
+          browser: "Chrome",
+          os: "Android",
+          screenW: 390,
+          screenH: 844,
+          language: "ru-RU",
+          connectionType: "4g",
+          timezone: "Europe/Moscow",
+          timezoneOffset: -180,
+          languages: ["ru-RU", "ru", "en"],
+          viewportW: 390,
+          viewportH: 720,
+          devicePixelRatio: 3,
+          colorScheme: "dark",
+          reducedMotion: false,
+          hardwareConcurrency: 8,
+          deviceMemory: 4,
+          referrerHost: "yandex.ru",
+          utmSource: "yandex",
+          utmMedium: "cpc",
+          utmCampaign: "spring_sale",
+          utmTerm: "analytics",
+          utmContent: "ad1",
+          ts,
+        },
+      }],
     }));
     assert.equal(res.statusCode, 200);
   });

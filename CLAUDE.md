@@ -103,7 +103,7 @@ Every `POST /api/events` body must be:
 | `form` | `action` (focus/blur/submit/abandon), `formHash`, `fieldIndex`, `fieldType`, `fillDurationMs`, `ts` | Form interaction (no values) |
 | `engagement` | `activeMs`, `idleMs`, `maxScrollPercent`, `scrollSpeed`, `microScrolls`, `readthrough`, `ts` | Page engagement snapshot |
 | `session` | `pageCount`, `avgNavSpeedMs`, `isBounce`, `isHyperEngaged`, `timeBucket`, `ts` | Session-level signals |
-| `context` | `trafficSource`, `deviceType`, `browser`, `os`, `screenW`, `screenH`, `language`, `connectionType`, `ts` | Device/traffic context |
+| `context` | `trafficSource`, `deviceType`, `browser`, `os`, `screenW`, `screenH`, `language`, `connectionType`, `ts` + extended optional: `timezone`, `timezoneOffset`, `languages[]`, `viewportW`, `viewportH`, `devicePixelRatio`, `colorScheme`, `reducedMotion`, `hardwareConcurrency`, `deviceMemory`, `referrerHost`, `utmSource`, `utmMedium`, `utmCampaign`, `utmTerm`, `utmContent` | Device/traffic context. Emitted once per session on start. The 16 extended fields are optional on server validation so older cached bundles still pass; the current SDK always populates them. |
 | `cross_session` | `visitorId`, `visitNumber`, `returnWithin24h`, `returnWithin7d`, `ts` | Cross-session tracking |
 | `goal` | `goalId`, `value?`, `metadata?`, `ts` | Conversion goal event |
 | `bot_signals` | `webdriver`, `phantom`, `nightmare`, `selenium`, `cdp`, `pluginCount`, `languageCount`, `hasChrome`, `notificationPermission`, `hardwareConcurrency`, `deviceMemory`, `touchSupport`, `screenColorDepth`, `ts` | Bot/automation fingerprint signals |

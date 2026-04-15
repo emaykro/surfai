@@ -128,6 +128,29 @@ function calculateBotScore(features, botSignalEvents) {
   signalDetails.no_scroll_variation = noScrollVariation;
 
   // -------------------------------------------------------------------------
+  // Hard rules: unambiguous automation markers
+  //
+  // navigator.webdriver, window.callPhantom, _phantom, __nightmare, and
+  // Selenium-injected globals are never present in real browsers. Treat any
+  // one of them as ground truth — bypass the numeric score so ML labels are
+  // deterministic instead of borderline.
+  // -------------------------------------------------------------------------
+  const hardBot = !!(
+    bs &&
+    (bs.webdriver || bs.phantom || bs.nightmare || bs.selenium)
+  );
+  signalDetails.hard_rule_triggered = hardBot;
+
+  if (hardBot) {
+    return {
+      bot_score: 1.0,
+      bot_risk_level: "high",
+      bot_signals: signalDetails,
+      is_bot: true,
+    };
+  }
+
+  // -------------------------------------------------------------------------
   // Combine
   // -------------------------------------------------------------------------
   const rawScore = Math.min(fingerprintScore + behavioralScore, 1.0);

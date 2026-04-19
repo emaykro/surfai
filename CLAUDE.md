@@ -138,6 +138,9 @@ Every `POST /api/events` body must be:
 | `GET` | `/api/sessions/:sessionId/features` | Computed ML feature vector for a session |
 | `GET` | `/api/sessions/:sessionId/conversions` | Conversion events for a session |
 | `GET` | `/api/reconciliation/daily?days=30&site_id=X` | Metrica vs SURFAI daily counts from `metrica_daily_reconciliation`. Populated by `npm run metrica:reconcile` on the server. |
+| `GET` | `/api/sites/health` | Per-site health last 48h; detects the "passive-only event mix" fingerprint plus session-drop / install-verified / missing-interaction-types flags. Consumed by `/dashboard/sites.html`. |
+| `GET` | `/api/ml/readiness` | Enriched conversions vs target + 14-day-trailing daily rate + ETA. Drives the header widget on `/dashboard/`. |
+| `GET` | `/api/health` | Aggregate system health: DB, disk, memory, ingest liveness, reconcile-timer age, Metrica-token expiry. Returns HTTP 503 when any check is critical. |
 | `POST` | `/api/projects` | Create project (name, vertical) |
 | `GET` | `/api/projects` | List projects with 24h stats |
 | `GET` | `/api/projects/:projectId` | Project detail |
@@ -329,3 +332,4 @@ Starting 2026-04-10, the ingest path looks up the client IP against local MMDB f
 | `YANDEX_METRICA_REFRESH_TOKEN` | (empty) | Refresh token; consumed by `refreshAccessToken()` helper when the access token expires. |
 | `YANDEX_OAUTH_CLIENT_ID` / `_CLIENT_SECRET` | (empty) | OAuth app credentials, used only for refresh flow. |
 | `YANDEX_METRICA_ENABLED` | `false` | Gate for the *scheduled* reconcile worker (cron/systemd). Manual `npm run metrica:reconcile` ignores it. |
+| `YANDEX_METRICA_TOKEN_ISSUED_AT` | (empty → health endpoint warns) | Date the current access token was issued, YYYY-MM-DD. Used by `/api/health` to warn when the assumed 365-day TTL is within 30 days of expiry. |

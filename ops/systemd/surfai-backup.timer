@@ -1,0 +1,13 @@
+[Unit]
+Description=SURFAI postgres daily backup (daily 03:30 MSK)
+Requires=surfai-backup.service
+
+[Timer]
+# Runs 30 min before the metrica reconcile timer so they don't overlap.
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=120
+Unit=surfai-backup.service
+
+[Install]
+WantedBy=timers.target

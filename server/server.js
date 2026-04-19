@@ -1345,6 +1345,141 @@ fastify.get("/api/reconciliation/daily", { preHandler: [requireOperatorAuth] }, 
 });
 
 // ---------------------------------------------------------------------------
+// Health — single aggregated view for monitoring + operator sanity check
+// ---------------------------------------------------------------------------
+
+// Assumed Metrica OAuth token lifetime (Yandex issues long-lived tokens
+// ~1 year). If YANDEX_METRICA_TOKEN_ISSUED_AT is set in env as YYYY-MM-DD,
+// we compute days-remaining and warn when < this threshold.
+const METRICA_TOKEN_TTL_DAYS = 365;
+const METRICA_TOKEN_WARN_DAYS = 30;
+
+fastify.get("/api/health", { preHandler: [requireOperatorAuth] }, async (_request, reply) => {
+  const fs = require("node:fs/promises");
+  const os = require("node:os");
+
+  const checks = {};
+
+  // --- Database: connectivity + trivial query latency ---------------------
+  const dbStart = Date.now();
+  try {
+    await pool.query("SELECT 1");
+    checks.database = {
+      ok: true,
+      latency_ms: Date.now() - dbStart,
+    };
+  } catch (err) {
+    checks.database = {
+      ok: false,
+      error: err.message.slice(0, 200),
+    };
+  }
+
+  // --- Disk: free % on the filesystem containing the CWD -----------------
+  try {
+    const stat = await fs.statfs(process.cwd());
+    const total = stat.blocks * stat.bsize;
+    const free = stat.bavail * stat.bsize;
+    const usedPct = +((1 - free / total) * 100).toFixed(1);
+    checks.disk = {
+      ok: usedPct < 90,
+      level: usedPct >= 95 ? "critical" : usedPct >= 80 ? "warn" : "ok",
+      used_percent: usedPct,
+      free_bytes: free,
+      total_bytes: total,
+    };
+  } catch (err) {
+    checks.disk = { ok: false, error: err.message.slice(0, 200) };
+  }
+
+  // --- Memory: system-wide free/total ------------------------------------
+  {
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedPct = +((1 - freeMem / totalMem) * 100).toFixed(1);
+    checks.memory = {
+      ok: usedPct < 90,
+      level: usedPct >= 95 ? "critical" : usedPct >= 85 ? "warn" : "ok",
+      used_percent: usedPct,
+      free_bytes: freeMem,
+      total_bytes: totalMem,
+    };
+  }
+
+  // --- Ingest liveness: when did we last persist any batch? --------------
+  try {
+    const { rows } = await pool.query(
+      "SELECT MAX(received_at) AS last FROM raw_batches"
+    );
+    const last = rows[0].last;
+    const ageSec = last ? Math.floor((Date.now() - new Date(last).getTime()) / 1000) : null;
+    // Under normal load we expect an event every few seconds. 10 min of
+    // silence is a clear red flag; 2 min is a warn.
+    checks.ingest_recent = {
+      ok: ageSec != null && ageSec < 600,
+      level: ageSec == null ? "warn" : ageSec >= 600 ? "critical" : ageSec >= 120 ? "warn" : "ok",
+      last_batch_at: last,
+      age_seconds: ageSec,
+    };
+  } catch (err) {
+    checks.ingest_recent = { ok: false, error: err.message.slice(0, 200) };
+  }
+
+  // --- Metrica reconcile timer: latest row age ---------------------------
+  try {
+    const { rows } = await pool.query(
+      "SELECT MAX(fetched_at) AS last FROM metrica_daily_reconciliation"
+    );
+    const last = rows[0].last;
+    const ageHours = last ? (Date.now() - new Date(last).getTime()) / 3600_000 : null;
+    // Timer fires daily. We expect last-run age < 25h; > 48h means something
+    // went wrong.
+    checks.metrica_reconcile_timer = {
+      ok: ageHours != null && ageHours < 25,
+      level: ageHours == null ? "warn" : ageHours >= 48 ? "critical" : ageHours >= 25 ? "warn" : "ok",
+      last_fetched_at: last,
+      age_hours: ageHours == null ? null : +ageHours.toFixed(1),
+    };
+  } catch (err) {
+    checks.metrica_reconcile_timer = { ok: false, error: err.message.slice(0, 200) };
+  }
+
+  // --- Metrica OAuth token expiry (soft reminder) ------------------------
+  const issued = process.env.YANDEX_METRICA_TOKEN_ISSUED_AT;
+  if (issued && /^\d{4}-\d{2}-\d{2}$/.test(issued)) {
+    const issuedMs = new Date(issued + "T00:00:00Z").getTime();
+    const ageDays = (Date.now() - issuedMs) / (86400 * 1000);
+    const remaining = Math.floor(METRICA_TOKEN_TTL_DAYS - ageDays);
+    checks.metrica_token_expiry = {
+      ok: remaining > METRICA_TOKEN_WARN_DAYS,
+      level: remaining <= 7 ? "critical" : remaining <= METRICA_TOKEN_WARN_DAYS ? "warn" : "ok",
+      issued_at: issued,
+      days_remaining: remaining,
+    };
+  } else {
+    checks.metrica_token_expiry = {
+      ok: false,
+      level: "warn",
+      error: "YANDEX_METRICA_TOKEN_ISSUED_AT not set (expected YYYY-MM-DD)",
+    };
+  }
+
+  // --- Aggregate status ---------------------------------------------------
+  const levels = Object.values(checks).map((c) => c.level || (c.ok ? "ok" : "critical"));
+  let status = "healthy";
+  if (levels.includes("critical")) status = "unhealthy";
+  else if (levels.includes("warn")) status = "degraded";
+
+  reply.code(status === "unhealthy" ? 503 : 200);
+  return {
+    status,
+    as_of: new Date().toISOString(),
+    uptime_seconds: Math.floor(process.uptime()),
+    checks,
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Persistence (non-blocking, after HTTP reply)
 // ---------------------------------------------------------------------------
 

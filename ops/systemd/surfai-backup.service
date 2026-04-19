@@ -1,0 +1,20 @@
+[Unit]
+Description=SURFAI postgres daily backup
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/surfai/ops/backup.sh
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=surfai-backup
+
+# Hardening: only the backup dir is writable.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/surfai/backups /tmp
+PrivateTmp=true

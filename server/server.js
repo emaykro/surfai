@@ -1181,6 +1181,133 @@ fastify.get("/api/ml/readiness", { preHandler: [requireOperatorAuth] }, async ()
 });
 
 // ---------------------------------------------------------------------------
+// Per-site health — detects silent data loss (the 2026-04-10
+// химчистка-луч.рф fingerprint: passive timer events still flow while
+// interaction events are gone because the tracker/GTM tag was removed)
+// ---------------------------------------------------------------------------
+
+const INTERACTION_EVENT_TYPES = ["click", "form", "scroll", "mouse", "performance"];
+const PASSIVE_EVENT_TYPES = ["engagement", "idle", "cross_session", "context", "bot_signals", "session"];
+
+fastify.get("/api/sites/health", { preHandler: [requireOperatorAuth] }, async () => {
+  const nowMs = Date.now();
+  const ms48h = nowMs - 48 * 3600 * 1000;
+
+  // One sweep per concern — 4 small queries are cheaper than one JOIN and far easier to read.
+  const [sites, eventMix, sessionBuckets, latestRatio] = await Promise.all([
+    pool.query(
+      `SELECT site_id, domain, install_status, last_event_at, yandex_counter_id
+         FROM sites
+        ORDER BY domain`
+    ),
+    pool.query(
+      `SELECT site_id, type, COUNT(*)::int AS n
+         FROM events
+        WHERE ts >= $1
+        GROUP BY site_id, type`,
+      [ms48h]
+    ),
+    pool.query(
+      `SELECT site_id,
+              COUNT(*) FILTER (WHERE first_seen_at >= NOW() - INTERVAL '24 hours')::int AS sessions_24h,
+              COUNT(*) FILTER (WHERE first_seen_at >= NOW() - INTERVAL '48 hours')::int AS sessions_48h,
+              COUNT(*) FILTER (WHERE first_seen_at >= NOW() - INTERVAL '7 days')::int   AS sessions_7d
+         FROM sessions
+        GROUP BY site_id`
+    ),
+    pool.query(
+      `SELECT DISTINCT ON (site_id)
+              site_id, date, divergence_ratio, metrica_visits, surfai_sessions
+         FROM metrica_daily_reconciliation
+        ORDER BY site_id, date DESC`
+    ),
+  ]);
+
+  const mixBySite = {};
+  for (const r of eventMix.rows) {
+    if (!mixBySite[r.site_id]) mixBySite[r.site_id] = {};
+    mixBySite[r.site_id][r.type] = r.n;
+  }
+  const bucketsBySite = Object.fromEntries(sessionBuckets.rows.map((r) => [r.site_id, r]));
+  const ratioBySite = Object.fromEntries(latestRatio.rows.map((r) => [r.site_id, r]));
+
+  const result = sites.rows.map((s) => {
+    const mix = mixBySite[s.site_id] || {};
+    const buckets = bucketsBySite[s.site_id] || { sessions_24h: 0, sessions_48h: 0, sessions_7d: 0 };
+    const ratioRow = ratioBySite[s.site_id] || null;
+
+    const hasInteraction = INTERACTION_EVENT_TYPES.some((t) => (mix[t] || 0) > 0);
+    const hasPassive = PASSIVE_EVENT_TYPES.some((t) => (mix[t] || 0) > 0);
+    const missingInteractionTypes = INTERACTION_EVENT_TYPES.filter((t) => !(mix[t] > 0));
+
+    // Session-drop detection: compare last-24h rate to the 7d average. Only
+    // meaningful for sites that normally have a non-trivial amount of traffic
+    // (>5 sessions/day avg) — otherwise day-to-day variance is too noisy.
+    const avgDaily7d = buckets.sessions_7d / 7;
+    const sessionDrop =
+      avgDaily7d > 5 && buckets.sessions_24h < avgDaily7d * 0.3;
+
+    let health = "green";
+    let healthReason = "ok";
+
+    if (buckets.sessions_7d === 0) {
+      health = "gray";
+      healthReason = "never_tracked";
+    } else if (s.install_status !== "verified") {
+      health = "yellow";
+      healthReason = "unverified";
+    } else if (buckets.sessions_48h === 0) {
+      health = "red";
+      healthReason = "silent";
+    } else if (hasPassive && !hasInteraction) {
+      // The classic tag-removed-but-cached-tabs-still-flushing fingerprint.
+      health = "red";
+      healthReason = "passive_only";
+    } else if (sessionDrop) {
+      health = "red";
+      healthReason = "session_drop_70pct";
+    } else if (avgDaily7d > 10 && missingInteractionTypes.length >= 3) {
+      // A busy site that's missing 3+ of the 5 interaction types probably
+      // has a broken event type (e.g. form events stopped firing). Softer
+      // flag than passive-only because interactions ARE happening.
+      health = "yellow";
+      healthReason = "missing_interaction_types";
+    } else if (buckets.sessions_24h === 0 && buckets.sessions_48h > 0) {
+      health = "yellow";
+      healthReason = "quiet_last_24h";
+    }
+
+    return {
+      site_id: s.site_id,
+      domain: s.domain,
+      install_status: s.install_status,
+      last_event_at: s.last_event_at,
+      yandex_counter_id: s.yandex_counter_id,
+      sessions_24h: buckets.sessions_24h,
+      sessions_48h: buckets.sessions_48h,
+      sessions_7d: buckets.sessions_7d,
+      avg_daily_7d: Number(avgDaily7d.toFixed(1)),
+      event_mix_48h: mix,
+      interaction_types_present: INTERACTION_EVENT_TYPES.filter((t) => (mix[t] || 0) > 0),
+      interaction_types_missing: missingInteractionTypes,
+      has_interaction: hasInteraction,
+      has_only_passive: hasPassive && !hasInteraction,
+      health,
+      health_reason: healthReason,
+      latest_ratio: ratioRow ? Number(ratioRow.divergence_ratio) : null,
+      latest_ratio_date: ratioRow ? ratioRow.date : null,
+    };
+  });
+
+  return {
+    as_of: new Date().toISOString(),
+    interaction_event_types: INTERACTION_EVENT_TYPES,
+    passive_event_types: PASSIVE_EVENT_TYPES,
+    sites: result,
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Metrica reconciliation read API
 // ---------------------------------------------------------------------------
 

@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SURFAI — Site Health</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #232734;
+      --border: #2e3345;
+      --text: #e1e4ed;
+      --text-dim: #8b90a0;
+      --accent: #6c7cff;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --red: #f87171;
+      --gray: #6b7280;
+      --radius: 8px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      height: 56px;
+      gap: 16px;
+    }
+    header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.5px; }
+    header h1 span { color: var(--accent); }
+    header .badge {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    header nav { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
+    header nav a {
+      color: var(--text-dim);
+      text-decoration: none;
+      padding: 6px 10px;
+      border-radius: 6px;
+    }
+    header nav a:hover { background: var(--surface2); color: var(--text); }
+    header nav a.active { color: var(--text); background: var(--surface2); }
+
+    main { padding: 24px; max-width: 1600px; margin: 0 auto; }
+    h2 { font-size: 18px; margin-bottom: 6px; font-weight: 500; }
+    .subtitle { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+    .subtitle code {
+      background: var(--surface2);
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-family: inherit;
+      font-size: 12px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .toolbar button {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .toolbar button:hover { background: var(--surface2); }
+    .toolbar .as-of { margin-left: auto; color: var(--text-dim); font-size: 12px; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .card.h-green { border-left-color: var(--green); }
+    .card.h-yellow { border-left-color: var(--amber); }
+    .card.h-red    { border-left-color: var(--red); }
+    .card.h-gray   { border-left-color: var(--gray); opacity: 0.75; }
+
+    .card-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .domain {
+      font-size: 15px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .health-chip {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .health-chip.h-green  { color: var(--green); background: rgba(52,211,153,0.12); }
+    .health-chip.h-yellow { color: var(--amber); background: rgba(251,191,36,0.12); }
+    .health-chip.h-red    { color: var(--red);   background: rgba(248,113,113,0.12); }
+    .health-chip.h-gray   { color: var(--gray);  background: rgba(107,114,128,0.18); }
+
+    .meta-row {
+      display: flex;
+      gap: 14px;
+      font-size: 12px;
+      color: var(--text-dim);
+      flex-wrap: wrap;
+    }
+    .meta-row span strong { color: var(--text); font-weight: 500; }
+
+    .session-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 10px;
+      background: var(--surface2);
+      border-radius: 6px;
+    }
+    .session-row .bucket { text-align: center; }
+    .session-row .bucket .label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+    .session-row .bucket .val { font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+    .mix-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .mix-wrap .mix-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .mix-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 4px 12px;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .mix-grid .mix-item { display: flex; justify-content: space-between; }
+    .mix-grid .mix-item.zero { color: var(--text-dim); opacity: 0.5; }
+    .mix-grid .mix-item .type { color: var(--text-dim); }
+    .mix-grid .mix-item.interaction .type { color: var(--text); }
+    .mix-grid .mix-item.interaction.has::before { content: "● "; color: var(--green); }
+    .mix-grid .mix-item.interaction.zero::before { content: "○ "; color: var(--red); }
+
+    .footer-row {
+      display: flex;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--text-dim);
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .reason-chip {
+      background: var(--surface2);
+      padding: 2px 8px;
+      border-radius: 3px;
+      color: var(--text);
+      font-size: 11px;
+    }
+    .ratio-chip {
+      margin-left: auto;
+      padding: 2px 8px;
+      border-radius: 3px;
+      background: var(--surface2);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .empty { padding: 60px 20px; text-align: center; color: var(--text-dim); }
+    .error {
+      padding: 20px;
+      color: var(--red);
+      background: rgba(248,113,113,0.08);
+      border-radius: var(--radius);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>SURF</span>AI</h1>
+    <div class="badge">Site Health</div>
+    <nav>
+      <a href="/dashboard/">Sessions</a>
+      <a href="/dashboard/reconciliation.html">Reconciliation</a>
+      <a href="/dashboard/sites.html" class="active">Site Health</a>
+    </nav>
+  </header>
+
+  <main>
+    <h2>Site Health (last 48 hours)</h2>
+    <p class="subtitle">
+      Each card checks one site's last 48h of traffic for the signatures of silent data loss.
+      A site showing only passive timer events (<code>engagement, idle, cross_session, context, bot_signals, session</code>)
+      with no interaction events (<code>click, form, scroll, mouse, performance</code>) is the fingerprint of a removed tag
+      or GTM container — see the <code>vault/bugs/2026-04-19 luch gtm container removed.md</code> post-mortem.
+    </p>
+
+    <div class="toolbar">
+      <button id="refresh-btn">Refresh</button>
+      <span class="as-of" id="as-of"></span>
+    </div>
+
+    <div id="content">
+      <div class="empty">Loading…</div>
+    </div>
+  </main>
+
+  <script>
+    const API = window.location.origin;
+
+    function getOperatorToken() {
+      return localStorage.getItem("surfai_operator_token") || "";
+    }
+    function authFetch(url) {
+      const token = getOperatorToken();
+      return fetch(url, {
+        headers: token ? { Authorization: "Bearer " + token } : {},
+      });
+    }
+    function esc(s) {
+      const d = document.createElement("div");
+      d.textContent = String(s == null ? "" : s);
+      return d.innerHTML;
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return "never";
+      const ms = Date.now() - new Date(iso).getTime();
+      const mins = Math.floor(ms / 60000);
+      if (mins < 1) return "just now";
+      if (mins < 60) return mins + "m ago";
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + "h ago";
+      const days = Math.floor(hrs / 24);
+      return days + "d ago";
+    }
+
+    const REASON_LABELS = {
+      ok: "healthy",
+      never_tracked: "no data yet",
+      unverified: "install not yet verified",
+      silent: "0 sessions in 48h (was tracking)",
+      passive_only: "only passive events — tag removed?",
+      session_drop_70pct: "24h sessions dropped >70% vs 7d avg",
+      missing_interaction_types: "3+ interaction event types missing",
+      quiet_last_24h: "no sessions in last 24h",
+    };
+
+    function cardHtml(site, interactionTypes, passiveTypes) {
+      const h = site.health;
+      const klass = "h-" + h;
+      const mix = site.event_mix_48h || {};
+
+      const mixItems = [...interactionTypes, ...passiveTypes].map((t) => {
+        const n = mix[t] || 0;
+        const isInteraction = interactionTypes.includes(t);
+        const hasIt = n > 0;
+        const itemClass = (isInteraction ? "interaction " : "") + (hasIt ? "has" : "zero");
+        return (
+          '<div class="mix-item ' + itemClass + '">' +
+            '<span class="type">' + esc(t) + '</span>' +
+            '<span class="count">' + esc(n.toLocaleString()) + '</span>' +
+          '</div>'
+        );
+      }).join("");
+
+      const ratioChip = site.latest_ratio != null
+        ? '<span class="ratio-chip" title="Latest Metrica/SURFAI ratio: ' + esc(site.latest_ratio_date) + '">ratio ' + esc(site.latest_ratio.toFixed(2)) + '</span>'
+        : "";
+
+      return (
+        '<div class="card ' + klass + '">' +
+          '<div class="card-head">' +
+            '<div class="domain">' + esc(site.domain) + '</div>' +
+            '<div class="health-chip ' + klass + '">' + esc(h) + '</div>' +
+          '</div>' +
+
+          '<div class="meta-row">' +
+            '<span>install: <strong>' + esc(site.install_status) + '</strong></span>' +
+            '<span>last event: <strong>' + esc(timeAgo(site.last_event_at)) + '</strong></span>' +
+            (site.yandex_counter_id ? '<span>metrica: <strong>' + esc(site.yandex_counter_id) + '</strong></span>' : "") +
+          '</div>' +
+
+          '<div class="session-row">' +
+            '<div class="bucket"><div class="label">24h</div><div class="val">' + esc(site.sessions_24h) + '</div></div>' +
+            '<div class="bucket"><div class="label">48h</div><div class="val">' + esc(site.sessions_48h) + '</div></div>' +
+            '<div class="bucket"><div class="label">7d avg</div><div class="val">' + esc(site.avg_daily_7d) + '</div></div>' +
+          '</div>' +
+
+          '<div class="mix-wrap">' +
+            '<div class="mix-label">Event mix (48h) — ● interaction ○ absent</div>' +
+            '<div class="mix-grid">' + mixItems + '</div>' +
+          '</div>' +
+
+          '<div class="footer-row">' +
+            '<span class="reason-chip">' + esc(REASON_LABELS[site.health_reason] || site.health_reason) + '</span>' +
+            ratioChip +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    async function load() {
+      const content = document.getElementById("content");
+      content.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const res = await authFetch(API + "/api/sites/health");
+        if (res.status === 401) {
+          content.innerHTML = '<div class="error">401 Unauthorized — operator token missing or invalid. Log in on the main dashboard first.</div>';
+          return;
+        }
+        if (!res.ok) {
+          content.innerHTML = '<div class="error">Failed to load: ' + res.status + '</div>';
+          return;
+        }
+        const data = await res.json();
+        const sites = data.sites || [];
+        // Sort: red first, then yellow, then green, then gray. Alphabetical within group.
+        const order = { red: 0, yellow: 1, green: 2, gray: 3 };
+        sites.sort((a, b) => {
+          const d = (order[a.health] ?? 9) - (order[b.health] ?? 9);
+          return d !== 0 ? d : a.domain.localeCompare(b.domain);
+        });
+
+        if (!sites.length) {
+          content.innerHTML = '<div class="empty">No sites.</div>';
+        } else {
+          content.innerHTML = '<div class="grid">' +
+            sites.map((s) => cardHtml(s, data.interaction_event_types, data.passive_event_types)).join("") +
+          '</div>';
+        }
+        document.getElementById("as-of").textContent = data.as_of ? "As of " + new Date(data.as_of).toLocaleString() : "";
+      } catch (err) {
+        console.error(err);
+        content.innerHTML = '<div class="error">Error: ' + esc(err.message) + '</div>';
+      }
+    }
+
+    document.getElementById("refresh-btn").addEventListener("click", load);
+    load();
+    setInterval(load, 60 * 1000); // refresh every 60s
+  </script>
+</body>
+</html>

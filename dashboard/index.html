@@ -89,6 +89,14 @@
       font-weight: 500;
     }
 
+    /* ML retrain readiness widget. Three states:
+       - waiting (default): default palette
+       - close (<=14 days ETA): amber
+       - ready (>= target): green */
+    .header-stats span.ml-state-close  strong { color: #f5b86a; }
+    .header-stats span.ml-state-ready  strong { color: #7cd17c; }
+    .header-stats span#ml-readiness-wrap { cursor: help; }
+
     /* Sidebar — session list */
     .sidebar {
       background: var(--surface);
@@ -434,6 +442,7 @@
       <span>Conversions: <strong id="total-conversions">0</strong></span>
       <span>Conv. Rate: <strong id="conv-rate">0%</strong></span>
       <span>Events/min: <strong id="events-per-min">0</strong></span>
+      <span id="ml-readiness-wrap" title="Enriched conversions (post-2026-04-10) accumulating toward the CatBoost retrain target.">ML: <strong id="ml-readiness">…</strong></span>
     </div>
   </header>
 
@@ -1098,10 +1107,52 @@
 
     document.getElementById("refresh-btn").addEventListener("click", loadSessions);
 
+    // --- ML retrain readiness widget -----------------------------------------
+
+    async function loadMlReadiness() {
+      const wrap = document.getElementById("ml-readiness-wrap");
+      const val = document.getElementById("ml-readiness");
+      if (!wrap || !val) return;
+      try {
+        const res = await authFetch(API + "/api/ml/readiness");
+        if (!res.ok) {
+          val.textContent = "n/a";
+          return;
+        }
+        const d = await res.json();
+        const enr = d.enriched_conversions;
+        const tgt = d.target_conversions;
+        let label = `${enr} / ${tgt}`;
+        if (d.ready) {
+          label += " (ready)";
+        } else if (d.eta_date) {
+          const eta = new Date(d.eta_date);
+          const etaStr = eta.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+          label += ` (ETA ${etaStr})`;
+        }
+        val.textContent = label;
+        wrap.classList.remove("ml-state-close", "ml-state-ready");
+        if (d.ready) wrap.classList.add("ml-state-ready");
+        else if (d.eta_days != null && d.eta_days <= 14) wrap.classList.add("ml-state-close");
+        // Richer tooltip with the raw numbers.
+        const rate = d.daily_rate != null ? d.daily_rate.toFixed(2) : "—";
+        wrap.title =
+          `Enriched conversions: ${enr} / ${tgt} target\n` +
+          `Total conversions (pre + post enrichment): ${d.total_conversions}\n` +
+          `Daily rate: ${rate}/day\n` +
+          (d.eta_date ? `ETA to target: ${d.eta_date} (${d.eta_days} day${d.eta_days === 1 ? "" : "s"})` : "ETA: n/a");
+      } catch (err) {
+        console.error("Failed to load ML readiness:", err);
+        val.textContent = "n/a";
+      }
+    }
+
     // --- Init ----------------------------------------------------------------
 
     loadSessions();
     connectSSE();
+    loadMlReadiness();
+    setInterval(loadMlReadiness, 5 * 60 * 1000); // refresh every 5 min
   </script>
 </body>
 </html>

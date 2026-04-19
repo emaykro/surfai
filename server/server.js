@@ -1108,6 +1108,79 @@ fastify.get("/api/sessions/:sessionId/features", { preHandler: [requireOperatorA
 });
 
 // ---------------------------------------------------------------------------
+// ML retrain readiness
+// ---------------------------------------------------------------------------
+
+// How many enriched conversions we need before it's worth retraining
+// CatBoost on the new ~103-feature set. Baseline was ~28 on the old
+// 57-feature schema (2026-04-08 first model). "Enriched" = the session's
+// feature row has a non-null geo_country, which is the most reliable
+// marker that the session was captured after the 2026-04-10 data-enrichment
+// sprint (GeoIP, perf_*, uah_*). Change this number here; the dashboard
+// reads it from the endpoint.
+const ML_RETRAIN_TARGET_CONVERSIONS = 50;
+
+// Window for computing "current" daily rate. Short enough that a recent
+// slowdown or tag outage drags the ETA visibly, long enough to smooth
+// day-to-day noise.
+const ML_RATE_WINDOW_DAYS = 14;
+
+fastify.get("/api/ml/readiness", { preHandler: [requireOperatorAuth] }, async () => {
+  const { rows } = await pool.query(
+    `
+    SELECT
+      COUNT(*)::int                                        AS enriched_conversions,
+      MIN(c.created_at)                                    AS first_enriched_at,
+      MAX(c.created_at)                                    AS last_enriched_at,
+      COUNT(*) FILTER (WHERE c.created_at >= NOW() - ($1 || ' days')::interval)::int
+                                                           AS recent_enriched
+    FROM conversions c
+    JOIN session_features sf ON sf.session_id = c.session_id
+    WHERE sf.geo_country IS NOT NULL
+    `,
+    [ML_RATE_WINDOW_DAYS]
+  );
+  const totalRows = await pool.query("SELECT COUNT(*)::int AS n FROM conversions");
+
+  const enriched = rows[0].enriched_conversions || 0;
+  const firstAt = rows[0].first_enriched_at;
+  const lastAt = rows[0].last_enriched_at;
+  const recent = rows[0].recent_enriched || 0;
+  const total = totalRows.rows[0].n || 0;
+
+  // Daily rate over the trailing window, not the whole history. A recent
+  // drop-off should visibly push the ETA out instead of being masked by
+  // healthy early days.
+  const dailyRate = +(recent / ML_RATE_WINDOW_DAYS).toFixed(2);
+  let etaDays = null;
+  let etaDate = null;
+  const remaining = Math.max(0, ML_RETRAIN_TARGET_CONVERSIONS - enriched);
+  if (remaining === 0) {
+    etaDays = 0;
+    etaDate = new Date().toISOString().slice(0, 10);
+  } else if (dailyRate > 0) {
+    etaDays = Math.ceil(remaining / dailyRate);
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + etaDays);
+    etaDate = d.toISOString().slice(0, 10);
+  }
+
+  return {
+    enriched_conversions: enriched,
+    total_conversions: total,
+    target_conversions: ML_RETRAIN_TARGET_CONVERSIONS,
+    first_enriched_at: firstAt,
+    last_enriched_at: lastAt,
+    recent_enriched: recent,
+    rate_window_days: ML_RATE_WINDOW_DAYS,
+    daily_rate: dailyRate,
+    eta_days: etaDays,
+    eta_date: etaDate,
+    ready: enriched >= ML_RETRAIN_TARGET_CONVERSIONS,
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Metrica reconciliation read API
 // ---------------------------------------------------------------------------
 

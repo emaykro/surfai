@@ -152,7 +152,11 @@ Every `POST /api/events` body must be:
 | `DELETE` | `/api/goals/:goalId` | Soft-delete goal |
 | `POST` | `/api/conversions` | Server-side conversion registration |
 
-Dashboard UI: `http://localhost:3000/dashboard/`
+Dashboard UI (three pages, shared nav):
+- `http://localhost:3000/dashboard/` — Sessions list, live SSE feed, session detail + replay. Header shows ML retrain readiness widget.
+- `http://localhost:3000/dashboard/reconciliation.html` — Metrica vs SURFAI daily totals, pivot grid tinted by per-site baseline drift.
+- `http://localhost:3000/dashboard/sites.html` — Per-site health last 48h; detects "passive-only event mix" (tag removed fingerprint), session drops, missing interaction types.
+
 Operator Cabinet: `http://localhost:3000/cabinet/`
 
 ### Rules

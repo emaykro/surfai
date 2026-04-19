@@ -30,6 +30,7 @@ alwaysApply: false
 - `GET /api/sessions/:sessionId` — session detail with events (up to 5000). Optional `?type=` filter.
 - `GET /api/events/live` — Server-Sent Events stream. Broadcasts each batch after persistence. Keep-alive every 15s.
 - `GET /api/sessions/:sessionId/conversions` — List conversions with goal name/type.
+- `GET /api/reconciliation/daily?days=30&site_id=X` — daily Metrica-vs-SURFAI counts from `metrica_daily_reconciliation`. Populated by the `npm run metrica:reconcile` job.
 - `POST /api/goals` — Create goal (name, type, rules, is_primary). Tenant via `X-Tenant-Id` header.
 - `GET /api/goals` — List goals for tenant.
 - `PUT /api/goals/:goalId` — Update goal.
@@ -55,3 +56,11 @@ alwaysApply: false
 - The client IP is read once inside the `POST /api/events` handler as `request.ip`, passed to `computeAndStore()`, and discarded when the handler returns. It is NEVER persisted in `events`, `raw_batches`, or any other table. Only derived `geo_*` columns on `session_features` persist.
 - The GeoIP module must degrade gracefully when MMDB packages are missing (local dev): log a startup warning, return all-null objects from `lookup()`, and keep the ingest path working.
 - Attribution (CC BY 4.0 from DB-IP): dashboards and cabinets rendering geo data must include a visible link to `https://db-ip.com/`. TODO as of 2026-04-10.
+
+## Yandex Metrica Enrichment (Slice 1)
+
+- `server/features/yandex-metrica.js` — Reports API client. Reads `YANDEX_METRICA_TOKEN` at call time, not at require time, so a missing token never blocks server boot. Errors are classified via `err.code` (`TOKEN_MISSING`, `TOKEN_INVALID`, `RATE_LIMIT`, `SERVER_ERROR`, `REQUEST_ERROR`). `accuracy=` is omitted — `accuracy=full` requires a paid Metrica tier.
+- `server/jobs/metrica-reconcile.js` — standalone CLI worker. UPSERTs `(site_id, date)` into `metrica_daily_reconciliation`. Takes `--date`, `--site`, `--dry-run`, `--verbose`. Ignores `YANDEX_METRICA_ENABLED` for manual runs (flag only gates scheduled cron/systemd runs).
+- Only sites with non-null `sites.yandex_counter_id` are in scope. Adding a new site is a one-line UPDATE.
+- `metrica_goals_total` is deliberately NULL in Slice 1 — Metrica has no "sum across all goals" metric, so per-goal totals need discovering goals via `/management/v1/counter/{id}/goals` first. Deferred to Slice 2+.
+- Slice plan: `vault/decisions/2026-04-19_yandex_metrica_enrichment.md`.

@@ -96,6 +96,16 @@ A global `Accept-CH` response header is set via the `onSend` hook in `server.js`
 - **Log redaction**: `authorization` header is redacted from Pino logs. siteKey is truncated in warn-level origin mismatch logs.
 - **XSS**: Dashboard and cabinet use `textContent` / `esc()` for all dynamic data. No raw `innerHTML` with user/API data.
 
+## Yandex Metrica enrichment (Slice 1)
+
+`server/features/yandex-metrica.js` is the Reports API client. It reads the access token from `process.env.YANDEX_METRICA_TOKEN` at call time (never at require time, so a missing token only fails the specific call, never the server boot). Errors are classified by `err.code`: `TOKEN_MISSING`, `TOKEN_INVALID` (401), `RATE_LIMIT` (429), `SERVER_ERROR` (5xx), `REQUEST_ERROR` (other 4xx). The `accuracy=` parameter is deliberately omitted — `accuracy=full` requires a paid Metrica tier.
+
+`server/jobs/metrica-reconcile.js` is a standalone CLI worker: `npm run metrica:reconcile -- --date=YYYY-MM-DD [--site=<domain>] [--dry-run] [--verbose]`. It UPSERTs one row per `(site_id, date)` into `metrica_daily_reconciliation`. The worker ignores `YANDEX_METRICA_ENABLED` — that flag only gates the *scheduled* cron/systemd invocation. Manual runs are always allowed as long as `YANDEX_METRICA_TOKEN` is set.
+
+`GET /api/reconciliation/daily?days=30&site_id=X` (operator auth required) returns the last N days of reconciliation rows joined with `sites.domain`. Used by the dashboard.
+
+Only sites with non-null `sites.yandex_counter_id` participate. Adding a new site to the integration is a one-line UPDATE — no code change needed.
+
 ## Deployment Target
 
 Production server: Linux VPS ("Kukuruza"). Process manager: systemd or Docker. Reverse proxy: Nginx or Caddy with TLS termination.

@@ -7,7 +7,8 @@
     "start": "node server.js",
     "migrate": "node migrate.js",
     "test": "node --test __tests__/*.test.js",
-    "backfill": "node features/backfill.js"
+    "backfill": "node features/backfill.js",
+    "metrica:reconcile": "node jobs/metrica-reconcile.js"
   },
   "keywords": [],
   "author": "",

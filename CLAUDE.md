@@ -79,6 +79,10 @@ npm run migrate          # or: cd server && npm run migrate
 # Backfill feature vectors for existing sessions
 cd server && npm run backfill
 
+# Reconcile Yandex Metrica daily totals against our own (Slice 1)
+cd server && npm run metrica:reconcile -- --date=2026-04-18 --dry-run
+cd server && npm run metrica:reconcile             # yesterday, all sites, writes DB
+
 # Run all tests (client + server)
 npm test                 # client: vitest, server: node --test
 
@@ -133,6 +137,7 @@ Every `POST /api/events` body must be:
 | `GET` | `/api/events/live` | SSE stream — broadcasts batches as they arrive |
 | `GET` | `/api/sessions/:sessionId/features` | Computed ML feature vector for a session |
 | `GET` | `/api/sessions/:sessionId/conversions` | Conversion events for a session |
+| `GET` | `/api/reconciliation/daily?days=30&site_id=X` | Metrica vs SURFAI daily counts from `metrica_daily_reconciliation`. Populated by `npm run metrica:reconcile` on the server. |
 | `POST` | `/api/projects` | Create project (name, vertical) |
 | `GET` | `/api/projects` | List projects with 24h stats |
 | `GET` | `/api/projects/:projectId` | Project detail |
@@ -194,6 +199,7 @@ Phases 1–6 complete. Bot detection layer deployed 2026-04-08. Telemetry reliab
 | 011 | `geoip_enrichment.sql` | 10 `geo_*` columns (country, region, city, ASN, org, is_datacenter, ...) |
 | 012 | `performance_event_type.sql` | `performance` in `events_type_check` + 12 `perf_*` columns (LCP, CLS, ...) |
 | 013 | `ua_client_hints.sql` | 8 `uah_*` columns (brand, mobile, platform, model, arch, ...) |
+| 014 | `yandex_metrica.sql` | `sites.yandex_counter_id` (nullable BIGINT) + `metrica_daily_reconciliation` table. Pre-populates counter IDs for the 5 prod sites. Slice 1 of the Metrica enrichment plan (see `vault/decisions/2026-04-19_yandex_metrica_enrichment.md`). |
 
 **Critical rule:** any new `events.type` value requires updating `events_type_check` in a migration in the SAME commit as the SDK change. Otherwise atomic `persistBatch` will reject every batch containing the new type. Learned from the 2026-04-08 incident — see `vault/bugs/2026-04-10 context and session event loss.md`.
 
@@ -315,3 +321,7 @@ Starting 2026-04-10, the ingest path looks up the client IP against local MMDB f
 | `OPERATOR_API_TOKEN` | (empty — returns 401) | Bearer token for operator/dashboard API |
 | `ALLOW_INGEST_WITHOUT_SITEKEY` | `false` | Allow ingest without siteKey (dev only) |
 | `LOG_LEVEL` | `info` | Pino log level |
+| `YANDEX_METRICA_TOKEN` | (empty — reconcile worker aborts) | OAuth access token, `metrika:read` scope. TTL ~1 year. |
+| `YANDEX_METRICA_REFRESH_TOKEN` | (empty) | Refresh token; consumed by `refreshAccessToken()` helper when the access token expires. |
+| `YANDEX_OAUTH_CLIENT_ID` / `_CLIENT_SECRET` | (empty) | OAuth app credentials, used only for refresh flow. |
+| `YANDEX_METRICA_ENABLED` | `false` | Gate for the *scheduled* reconcile worker (cron/systemd). Manual `npm run metrica:reconcile` ignores it. |

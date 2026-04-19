@@ -1108,6 +1108,43 @@ fastify.get("/api/sessions/:sessionId/features", { preHandler: [requireOperatorA
 });
 
 // ---------------------------------------------------------------------------
+// Metrica reconciliation read API
+// ---------------------------------------------------------------------------
+
+fastify.get("/api/reconciliation/daily", { preHandler: [requireOperatorAuth] }, async (request, reply) => {
+  const days = Math.min(Math.max(parseInt(request.query.days, 10) || 30, 1), 365);
+  const siteId = request.query.site_id || null;
+
+  const params = [days];
+  let siteClause = "";
+  if (siteId) {
+    params.push(siteId);
+    siteClause = `AND r.site_id = $${params.length}`;
+  }
+
+  const { rows } = await pool.query(
+    `SELECT r.site_id,
+            s.domain,
+            r.date,
+            r.metrica_visits,
+            r.metrica_users,
+            r.metrica_pageviews,
+            r.metrica_goals_total,
+            r.surfai_sessions,
+            r.surfai_conversions,
+            r.divergence_ratio,
+            r.fetched_at
+       FROM metrica_daily_reconciliation r
+       JOIN sites s ON s.site_id = r.site_id
+      WHERE r.date >= CURRENT_DATE - ($1::int) ${siteClause}
+      ORDER BY r.date DESC, s.domain ASC`,
+    params
+  );
+
+  return { days, site_id: siteId, rows };
+});
+
+// ---------------------------------------------------------------------------
 // Persistence (non-blocking, after HTTP reply)
 // ---------------------------------------------------------------------------
 

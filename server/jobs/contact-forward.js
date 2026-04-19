@@ -137,18 +137,27 @@ async function main() {
     }
 
     // 2) Forward to admin chat via the ops bot.
+    //
+    // We used to add an inline button "Открыть чат с автором" pointing at
+    // tg://user?id=<chat_id>, but Telegram rejects this with
+    // BUTTON_USER_INVALID — bots can't create buttons to arbitrary users
+    // by numeric id. If the sender has a username, fall back to a public
+    // https://t.me/<username> button; otherwise the admin can still tap
+    // the @username in the notification body (Telegram auto-linkifies it).
     try {
       const adminText = formatAdminNotification(msg);
-      const inlineButton = chatId
-        ? { inline_keyboard: [[{ text: "Открыть чат с автором", url: `tg://user?id=${chatId}` }]] }
-        : undefined;
       const params = {
         chat_id: String(ADMIN_CHAT_ID),
         text: adminText,
         parse_mode: "HTML",
         disable_web_page_preview: "true",
       };
-      if (inlineButton) params.reply_markup = JSON.stringify(inlineButton);
+      const username = msg.from?.username;
+      if (username) {
+        params.reply_markup = JSON.stringify({
+          inline_keyboard: [[{ text: `Открыть @${username}`, url: `https://t.me/${username}` }]],
+        });
+      }
 
       await tg(ADMIN_TOKEN, "sendMessage", params);
       processed++;

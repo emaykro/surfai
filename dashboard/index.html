@@ -89,6 +89,17 @@
       font-weight: 500;
     }
 
+    /* Top-bar nav link */
+    header a.nav-link {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      background: var(--surface2);
+    }
+    header a.nav-link:hover { color: var(--text); }
+
     /* ML retrain readiness widget. Three states:
        - waiting (default): default palette
        - close (<=14 days ETA): amber
@@ -437,6 +448,7 @@
   <header>
     <h1><span>SURF</span>AI</h1>
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+    <a href="/dashboard/reconciliation.html" class="nav-link" title="Metrica vs SURFAI daily reconciliation">Reconciliation →</a>
     <div class="header-stats">
       <span>Sessions: <strong id="total-sessions">0</strong></span>
       <span>Conversions: <strong id="total-conversions">0</strong></span>

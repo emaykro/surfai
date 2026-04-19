@@ -1,0 +1,13 @@
+[Unit]
+Description=SURFAI health alerter (every 5 minutes)
+Requires=surfai-health-alert.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+# Small jitter so we don't hit the API at an exact round clock tick
+RandomizedDelaySec=15
+Unit=surfai-health-alert.service
+
+[Install]
+WantedBy=timers.target

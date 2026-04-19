@@ -8,7 +8,8 @@
     "migrate": "node migrate.js",
     "test": "node --test __tests__/*.test.js",
     "backfill": "node features/backfill.js",
-    "metrica:reconcile": "node jobs/metrica-reconcile.js"
+    "metrica:reconcile": "node jobs/metrica-reconcile.js",
+    "health:alert": "node jobs/health-alert.js"
   },
   "keywords": [],
   "author": "",

@@ -1,0 +1,28 @@
+[Unit]
+Description=SURFAI health alerter (poll /api/health, post to Telegram on transitions)
+After=network-online.target surfai.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=surfai
+Group=surfai
+WorkingDirectory=/opt/surfai/server
+EnvironmentFile=/opt/surfai/.env
+# systemd auto-creates /var/lib/surfai-alerts owned by User=surfai so the
+# state file (default path: /var/lib/surfai-alerts/state.json) is
+# persistent across runs AND sandbox-safe.
+StateDirectory=surfai-alerts
+StateDirectoryMode=0700
+Environment=ALERT_STATE_FILE=/var/lib/surfai-alerts/state.json
+ExecStart=/usr/bin/npm run health:alert
+TimeoutStartSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=surfai-alert
+
+# Hardening (mirrors surfai.service)
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/surfai
+PrivateTmp=true

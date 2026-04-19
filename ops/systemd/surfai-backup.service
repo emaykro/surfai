@@ -7,6 +7,11 @@ Wants=postgresql.service
 Type=oneshot
 User=root
 Group=root
+# Ensure the backup directory exists BEFORE systemd sets up the mount
+# namespace for ReadWritePaths. The `+` prefix runs this command outside
+# the sandbox with full privileges — required because the sandbox is
+# what fails when the path doesn't exist yet.
+ExecStartPre=+/bin/mkdir -p /opt/surfai/backups
 ExecStart=/opt/surfai/ops/backup.sh
 TimeoutStartSec=900
 StandardOutput=journal

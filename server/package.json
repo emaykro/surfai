@@ -9,7 +9,8 @@
     "test": "node --test __tests__/*.test.js",
     "backfill": "node features/backfill.js",
     "metrica:reconcile": "node jobs/metrica-reconcile.js",
-    "health:alert": "node jobs/health-alert.js"
+    "health:alert": "node jobs/health-alert.js",
+    "contact:forward": "node jobs/contact-forward.js"
   },
   "keywords": [],
   "author": "",

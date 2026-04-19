@@ -1,0 +1,25 @@
+[Unit]
+Description=SURFAI contact-bot forwarder — poll @Surfaiask_bot, auto-reply, forward to admin
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=surfai
+Group=surfai
+WorkingDirectory=/opt/surfai/server
+EnvironmentFile=/opt/surfai/.env
+StateDirectory=surfai-contact
+StateDirectoryMode=0700
+Environment=CONTACT_STATE_FILE=/var/lib/surfai-contact/state.json
+ExecStart=/usr/bin/npm run contact:forward
+TimeoutStartSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=surfai-contact
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/surfai
+PrivateTmp=true

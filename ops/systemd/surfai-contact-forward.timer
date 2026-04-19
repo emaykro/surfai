@@ -1,0 +1,12 @@
+[Unit]
+Description=SURFAI contact forwarder (poll every 60 seconds)
+Requires=surfai-contact-forward.service
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=60sec
+RandomizedDelaySec=10
+Unit=surfai-contact-forward.service
+
+[Install]
+WantedBy=timers.target

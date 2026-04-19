@@ -1364,13 +1364,16 @@ fastify.get("/api/health", { preHandler: [requireOperatorAuth] }, async (_reques
   const dbStart = Date.now();
   try {
     await pool.query("SELECT 1");
+    const latency = Date.now() - dbStart;
     checks.database = {
       ok: true,
-      latency_ms: Date.now() - dbStart,
+      level: latency >= 500 ? "warn" : "ok",
+      latency_ms: latency,
     };
   } catch (err) {
     checks.database = {
       ok: false,
+      level: "critical",
       error: err.message.slice(0, 200),
     };
   }

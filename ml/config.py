@@ -85,6 +85,8 @@ NUMERIC_FEATURES = [
     "perf_long_task_total_ms",
     "cross_visit_number",
     "bot_score",
+    # Temporal enrichment (added 2026-04-25)
+    "session_local_hour",  # 0–23, local hour in user's own timezone at session start
 ]
 
 BOOLEAN_FEATURES = [

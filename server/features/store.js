@@ -99,6 +99,8 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp, uaHints) 
     "cross_visit_number", "cross_return_24h", "cross_return_7d",
     "event_count",
     "bot_score", "bot_risk_level", "bot_signals", "is_bot",
+    // Temporal enrichment (added 2026-04-25)
+    "session_local_hour",
   ];
 
   for (const col of FEATURE_COLUMNS) {

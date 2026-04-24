@@ -421,7 +421,23 @@ function extractContext(events) {
     ctx_utm_term: first.utmTerm ?? null,
     ctx_utm_content: first.utmContent ?? null,
     metrica_client_id: first.metricaClientId ?? null,
+    session_local_hour: localHour(first.ts, first.timezone),
   };
+}
+
+function localHour(tsMs, timezone) {
+  if (!tsMs || !timezone) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      hour12: false,
+    }).formatToParts(new Date(tsMs));
+    const h = parts.find((p) => p.type === "hour");
+    return h ? parseInt(h.value, 10) % 24 : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

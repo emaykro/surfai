@@ -50,6 +50,34 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp, uaHints) 
     Object.assign(features, uaHints);
   }
 
+  // Return-visit engagement delta: compare active_ms of this session
+  // to the most recent prior session from the same visitor.
+  // Null for first-time visitors or when previous session lacks engagement data.
+  if (features.visitor_id && features.cross_visit_number > 1) {
+    try {
+      const { rows: prevRows } = await pool.query(
+        `SELECT engagement_active_ms
+         FROM session_features
+         WHERE visitor_id = $1
+           AND session_id != $2
+           AND engagement_active_ms IS NOT NULL
+         ORDER BY computed_at DESC
+         LIMIT 1`,
+        [features.visitor_id, sessionId]
+      );
+      if (prevRows.length) {
+        const prev = prevRows[0].engagement_active_ms;
+        const curr = features.engagement_active_ms;
+        if (typeof curr === "number" && prev > 0) {
+          features.engagement_delta_ms = curr - prev;
+          features.engagement_delta_ratio = Math.round((curr / prev - 1) * 1000) / 1000;
+        }
+      }
+    } catch {
+      // Non-fatal: delta stays null if the lookup fails
+    }
+  }
+
   // Build the upsert query dynamically from the features object
   const columns = [];
   const values = [sessionId]; // $1 = session_id
@@ -97,6 +125,7 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp, uaHints) 
     "uah_brand", "uah_brand_version", "uah_mobile",
     "uah_platform", "uah_platform_version",
     "uah_model", "uah_arch", "uah_bitness",
+    "visitor_id",
     "cross_visit_number", "cross_return_24h", "cross_return_7d",
     "event_count",
     "bot_score", "bot_risk_level", "bot_signals", "is_bot",
@@ -107,6 +136,9 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp, uaHints) 
     // Tab visibility (added 2026-04-25)
     "tab_blur_count",
     "tab_hidden_ms",
+    // Return-visit engagement delta (added 2026-04-25)
+    "engagement_delta_ms",
+    "engagement_delta_ratio",
   ];
 
   for (const col of FEATURE_COLUMNS) {

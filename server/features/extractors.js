@@ -512,6 +512,7 @@ function extractCrossSession(events) {
   const latest = events[events.length - 1].data;
 
   return {
+    visitor_id: latest.visitorId ?? null,
     cross_visit_number: latest.visitNumber,
     cross_return_24h: latest.returnWithin24h,
     cross_return_7d: latest.returnWithin7d,

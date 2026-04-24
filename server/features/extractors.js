@@ -489,6 +489,20 @@ function extractCopy(events) {
 }
 
 // ---------------------------------------------------------------------------
+// Tab visibility
+// ---------------------------------------------------------------------------
+
+function extractTabVisibility(events) {
+  if (!events.length) return { tab_blur_count: 0, tab_hidden_ms: 0 };
+  // Take the last snapshot — it has the highest cumulative counts
+  const latest = events[events.length - 1].data;
+  return {
+    tab_blur_count: latest.tabBlurCount ?? 0,
+    tab_hidden_ms: latest.tabHiddenMs ?? 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Cross-session
 // ---------------------------------------------------------------------------
 
@@ -531,6 +545,7 @@ function extractAllFeatures(events) {
     ...extractCrossSession(byType.cross_session || []),
     ...extractPerformance(byType.performance || []),
     ...extractCopy(byType.copy || []),
+    ...extractTabVisibility(byType.tab_visibility || []),
     event_count: events.length,
   };
 
@@ -549,5 +564,6 @@ module.exports = {
   extractCrossSession,
   extractPerformance,
   extractCopy,
+  extractTabVisibility,
   slidingWindow,
 };

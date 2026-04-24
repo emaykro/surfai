@@ -129,6 +129,12 @@ export interface CopyEventData {
   ts: number;
 }
 
+export interface TabVisibilityEventData {
+  tabBlurCount: number;   // times user hid this tab
+  tabHiddenMs: number;    // total ms the tab was hidden
+  ts: number;
+}
+
 export interface BotSignalsEventData {
   webdriver: boolean;
   phantom: boolean;
@@ -159,7 +165,8 @@ export type TrackingEvent =
   | { type: "goal"; data: GoalEventData }
   | { type: "bot_signals"; data: BotSignalsEventData }
   | { type: "performance"; data: PerformanceEventData }
-  | { type: "copy"; data: CopyEventData };
+  | { type: "copy"; data: CopyEventData }
+  | { type: "tab_visibility"; data: TabVisibilityEventData };
 
 // ---------------------------------------------------------------------------
 // Collector interface — all collectors implement this

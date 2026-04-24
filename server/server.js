@@ -383,13 +383,24 @@ const performanceDataSchema = {
   },
 };
 
-const ALL_EVENT_TYPES = ["mouse", "scroll", "idle", "click", "form", "engagement", "session", "context", "cross_session", "goal", "bot_signals", "performance", "copy"];
+const ALL_EVENT_TYPES = ["mouse", "scroll", "idle", "click", "form", "engagement", "session", "context", "cross_session", "goal", "bot_signals", "performance", "copy", "tab_visibility"];
 
 const copyDataSchema = {
   type: "object",
   required: ["ts"],
   additionalProperties: false,
   properties: {
+    ts: { type: "number" },
+  },
+};
+
+const tabVisibilityDataSchema = {
+  type: "object",
+  required: ["tabBlurCount", "tabHiddenMs", "ts"],
+  additionalProperties: false,
+  properties: {
+    tabBlurCount: { type: "number" },
+    tabHiddenMs: { type: "number" },
     ts: { type: "number" },
   },
 };
@@ -454,6 +465,10 @@ const eventItemSchema = {
     {
       if: { properties: { type: { const: "copy" } } },
       then: { properties: { data: copyDataSchema } },
+    },
+    {
+      if: { properties: { type: { const: "tab_visibility" } } },
+      then: { properties: { data: tabVisibilityDataSchema } },
     },
   ],
 };

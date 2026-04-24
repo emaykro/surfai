@@ -104,6 +104,9 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp, uaHints) 
     "session_local_hour",
     // Copy intent signal (added 2026-04-25)
     "copy_count",
+    // Tab visibility (added 2026-04-25)
+    "tab_blur_count",
+    "tab_hidden_ms",
   ];
 
   for (const col of FEATURE_COLUMNS) {

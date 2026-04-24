@@ -90,6 +90,9 @@ NUMERIC_FEATURES = [
     "session_local_hour",  # 0–23, local hour in user's own timezone at session start
     # Copy intent signal (added 2026-04-25)
     "copy_count",          # clipboard copies per session; correlates with phone/price/address reads
+    # Tab visibility (added 2026-04-25)
+    "tab_blur_count",      # times user hid this tab (0 = never left; >0 = comparison shopping)
+    "tab_hidden_ms",       # total ms tab was in background
 ]
 
 BOOLEAN_FEATURES = [

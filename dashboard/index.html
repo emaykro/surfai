@@ -176,7 +176,8 @@
 
     .session-meta {
       display: flex;
-      gap: 12px;
+      flex-wrap: wrap;
+      gap: 4px 12px;
       margin-top: 4px;
       font-size: 11px;
       color: var(--text-dim);
@@ -499,6 +500,15 @@
     .dim-filters .clear-btn.visible { display: block; }
     .dim-filters .clear-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+    .session-ctx {
+      width: 100%;
+      font-size: 10px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     /* Segments tab content */
     .segments-panel {
       flex: 1;
@@ -587,6 +597,24 @@
     .bot-medium { background: var(--orange); }
     .bot-high   { background: var(--red); }
     .bot-unknown { background: var(--text-dim); }
+
+    /* Session context block */
+    .ctx-block h3 { margin-bottom: 10px; }
+    .ctx-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 6px 16px;
+    }
+    .ctx-item { display: flex; flex-direction: column; gap: 2px; }
+    .ctx-key { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; }
+    .ctx-val { font-size: 12px; color: var(--text); }
+    .ctx-risk-none   { color: var(--green); }
+    .ctx-risk-low    { color: #60a5fa; }
+    .ctx-risk-medium { color: var(--orange); }
+    .ctx-risk-high   { color: var(--red); }
+    .ctx-lcp-good  { color: var(--green); }
+    .ctx-lcp-needs { color: var(--orange); }
+    .ctx-lcp-poor  { color: var(--red); }
 
     /* Scrollbar */
     ::-webkit-scrollbar { width: 6px; }
@@ -748,18 +776,11 @@
         const data = await res.json();
         allSessions = data.sessions;
 
-        // Enrich with conversion data from session_features
-        await Promise.all(allSessions.map(async (s) => {
-          try {
-            const fRes = await authFetch(API + "/api/sessions/" + s.session_id + "/features");
-            if (fRes.ok) {
-              const fData = await fRes.json();
-              s.converted = fData.features.converted || false;
-              s.conversion_count = fData.features.conversion_count || 0;
-              s.intent_score = fData.features.model_prediction_score ?? null;
-            }
-          } catch { /* ignore — features may not exist yet */ }
-        }));
+        // converted / intent_score / geo / device come directly from the list API
+        // (LEFT JOIN session_features in the query) — no per-session round-trips needed
+        allSessions.forEach((s) => {
+          s.intent_score = s.model_prediction_score ?? null;
+        });
 
         renderSessionList();
         updateHeaderStats();
@@ -818,6 +839,17 @@
         agoSpan.textContent = ago;
         metaDiv.appendChild(evSpan);
         metaDiv.appendChild(agoSpan);
+
+        if (s.geo_country || s.ctx_device_type || s.ctx_browser) {
+          const ctxSpan = document.createElement("span");
+          ctxSpan.className = "session-ctx";
+          const parts = [];
+          if (s.geo_country) parts.push(s.geo_country);
+          if (s.ctx_device_type) parts.push(s.ctx_device_type);
+          if (s.ctx_browser) parts.push(s.ctx_browser);
+          ctxSpan.textContent = parts.join(" · ");
+          metaDiv.appendChild(ctxSpan);
+        }
 
         item.appendChild(idDiv);
         item.appendChild(metaDiv);
@@ -879,13 +911,16 @@
       detail.innerHTML = '<div class="empty-state">Loading...</div>';
 
       try {
-        const [sessionRes, convRes] = await Promise.all([
+        const [sessionRes, convRes, featRes] = await Promise.all([
           authFetch(API + "/api/sessions/" + sessionId),
           authFetch(API + "/api/sessions/" + sessionId + "/conversions"),
+          authFetch(API + "/api/sessions/" + sessionId + "/features"),
         ]);
         const data = await sessionRes.json();
         const convData = convRes.ok ? await convRes.json() : { conversions: [] };
+        const featData = featRes.ok ? await featRes.json() : null;
         data.conversions = convData.conversions;
+        data.features = featData ? featData.features : null;
         renderSessionDetail(data);
       } catch (err) {
         detail.innerHTML = '<div class="empty-state">Failed to load session</div>';
@@ -893,7 +928,7 @@
     }
 
     function renderSessionDetail(data) {
-      const { session, events, eventCount, conversions } = data;
+      const { session, events, eventCount, conversions, features } = data;
       const detail = document.getElementById("session-detail");
 
       // Compute stats
@@ -938,6 +973,22 @@
             <div class="stat-value" style="color:${convCount > 0 ? 'var(--green)' : 'var(--text)'}">${convCount}</div>
           </div>
         </div>
+
+        ${features ? `
+        <div class="replay-section ctx-block">
+          <h3>Session Context</h3>
+          <div class="ctx-grid">
+            ${features.geo_country    ? `<div class="ctx-item"><span class="ctx-key">Country</span><span class="ctx-val">${esc(features.geo_country)}${features.geo_city ? ` / ${esc(features.geo_city)}` : ""}</span></div>` : ""}
+            ${features.ctx_device_type ? `<div class="ctx-item"><span class="ctx-key">Device</span><span class="ctx-val">${esc(features.ctx_device_type)}</span></div>` : ""}
+            ${features.ctx_browser    ? `<div class="ctx-item"><span class="ctx-key">Browser</span><span class="ctx-val">${esc(features.ctx_browser)}${features.uah_platform_version ? ` ${esc(features.uah_platform_version)}` : ""}</span></div>` : ""}
+            ${features.ctx_os         ? `<div class="ctx-item"><span class="ctx-key">OS</span><span class="ctx-val">${esc(features.ctx_os)}</span></div>` : ""}
+            ${features.ctx_traffic_source ? `<div class="ctx-item"><span class="ctx-key">Source</span><span class="ctx-val">${esc(features.ctx_traffic_source)}</span></div>` : ""}
+            ${features.ctx_utm_source ? `<div class="ctx-item"><span class="ctx-key">UTM</span><span class="ctx-val">${esc(features.ctx_utm_source)}${features.ctx_utm_medium ? ` / ${esc(features.ctx_utm_medium)}` : ""}${features.ctx_utm_campaign ? ` / ${esc(features.ctx_utm_campaign)}` : ""}</span></div>` : ""}
+            ${features.bot_risk_level ? `<div class="ctx-item"><span class="ctx-key">Bot Risk</span><span class="ctx-val ctx-risk-${esc(features.bot_risk_level)}">${esc(features.bot_risk_level)}${features.bot_score != null ? ` (${Math.round(features.bot_score * 100)}%)` : ""}</span></div>` : ""}
+            ${features.model_prediction_score != null ? `<div class="ctx-item"><span class="ctx-key">Intent Score</span><span class="ctx-val" style="color:${features.model_prediction_score >= 0.7 ? "var(--red)" : features.model_prediction_score >= 0.4 ? "var(--orange)" : "var(--text-dim)"}">${Math.round(features.model_prediction_score * 100)}%</span></div>` : ""}
+            ${features.perf_lcp != null ? `<div class="ctx-item"><span class="ctx-key">LCP</span><span class="ctx-val ctx-lcp-${features.perf_lcp < 2500 ? "good" : features.perf_lcp < 4000 ? "needs" : "poor"}">${features.perf_lcp}ms</span></div>` : ""}
+          </div>
+        </div>` : ""}
 
         ${convCount > 0 ? `
         <div class="replay-section">
@@ -1386,6 +1437,8 @@
         },
       ];
 
+      const hasCountry = data.countries && data.countries.length > 0;
+
       panel.innerHTML = sections.map(({ title, rows, colorFn, hasConv }) => {
         if (!rows || !rows.length) return "";
         const maxSessions = Math.max(...rows.map((r) => r.sessions || 0), 1);
@@ -1411,7 +1464,9 @@
         }).join("");
 
         return `<div class="seg-card"><h3>${esc(title)}</h3>${rowsHtml}</div>`;
-      }).join("");
+      }).join("") + (hasCountry
+        ? `<div style="grid-column:1/-1;text-align:right;font-size:10px;color:var(--text-dim);padding:4px 0">IP Geolocation by <a href="https://db-ip.com/" target="_blank" rel="noopener" style="color:var(--text-dim);text-decoration:underline">DB-IP</a></div>`
+        : "");
     }
 
     function populateFilterOptions(data) {

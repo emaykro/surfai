@@ -637,12 +637,15 @@ fastify.get("/api/sessions", { preHandler: [requireOperatorAuth] }, async (reque
 
   const { rows } = await pool.query(
     `SELECT s.session_id, s.first_seen_at, s.last_seen_at, s.project_id, s.site_id,
-            COUNT(e.id)::int AS event_count
+            COUNT(e.id)::int AS event_count,
+            sf.converted, sf.conversion_count, sf.model_prediction_score,
+            sf.geo_country, sf.ctx_device_type, sf.ctx_browser, sf.bot_risk_level
      FROM sessions s
      LEFT JOIN events e ON e.session_id = s.session_id
-     ${needsFeatureJoin ? "LEFT JOIN session_features sf ON sf.session_id = s.session_id" : ""}
+     LEFT JOIN session_features sf ON sf.session_id = s.session_id
      ${whereClause}
-     GROUP BY s.id
+     GROUP BY s.id, sf.converted, sf.conversion_count, sf.model_prediction_score,
+              sf.geo_country, sf.ctx_device_type, sf.ctx_browser, sf.bot_risk_level
      ORDER BY s.last_seen_at DESC
      LIMIT $1 OFFSET $2`,
     params

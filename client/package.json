@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run bundle",
+    "bundle": "esbuild src/bundle.ts --bundle --outfile=dist/tracker.js --format=iife --target=es6 --minify",
     "test": "vitest run"
   },
   "keywords": [],

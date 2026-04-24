@@ -209,6 +209,7 @@ Phases 1–6 complete. Bot detection layer deployed 2026-04-08. Telemetry reliab
 | 014 | `yandex_metrica.sql` | `sites.yandex_counter_id` (nullable BIGINT) + `metrica_daily_reconciliation` table. Pre-populates counter IDs for the 5 prod sites. Slice 1 of the Metrica enrichment plan (see `vault/decisions/2026-04-19_yandex_metrica_enrichment.md`). |
 | 015 | `model_scoring.sql` | `model_prediction_score` (DOUBLE PRECISION) + `model_scored_at` (TIMESTAMPTZ) on `session_features`. Populated by `python3 -m ml score` (systemd timer every 5 min). |
 | 016 | `metrica_client_id.sql` | `metrica_client_id` TEXT on `session_features`. Populated from `context` event's `metricaClientId` field (`_ym_uid` cookie). For cross-system Metrica matching. |
+| 017 | `metrica_conversions_sync.sql` | `metrica_synced_at` TIMESTAMPTZ on `conversions`. NULL = not yet pushed to Metrica Offline Conversions API. Populated by `npm run metrica:conversions`. |
 
 **Critical rule:** any new `events.type` value requires updating `events_type_check` in a migration in the SAME commit as the SDK change. Otherwise atomic `persistBatch` will reject every batch containing the new type. Learned from the 2026-04-08 incident — see `vault/bugs/2026-04-10 context and session event loss.md`.
 
@@ -337,3 +338,4 @@ Starting 2026-04-10, the ingest path looks up the client IP against local MMDB f
 | `YANDEX_METRICA_TOKEN_ISSUED_AT` | (empty → health endpoint warns) | Date the current access token was issued, YYYY-MM-DD. Used by `/api/health` to warn when the assumed 365-day TTL is within 30 days of expiry. |
 | `TELEGRAM_BOT_TOKEN` | (empty → alerter aborts) | Bot token from @BotFather for the Telegram alert channel. Consumed by `npm run health:alert`. |
 | `TELEGRAM_ALERT_CHAT_ID` | (empty → alerter aborts) | Destination chat id for alerts (integer, private or group). Obtained via `getUpdates` after the user sends any message to the bot. |
+| `METRICA_CONVERSION_TARGET` | `lead` | Fallback Metrica goal name used when a SURFAI conversion has no matching goal name. Must match a goal configured in the Metrica counter. Consumed by `npm run metrica:conversions`. |

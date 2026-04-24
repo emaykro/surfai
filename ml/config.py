@@ -142,6 +142,11 @@ BOOLEAN_FEATURES = [
     "geo_is_mobile_carrier",
     # UA Client Hints
     "uah_mobile",
+    # Web Vitals degradation flags (Google "Needs Improvement" thresholds)
+    "perf_slow_lcp",
+    "perf_slow_inp",
+    "perf_slow_fcp",
+    "perf_slow_ttfb",
 ]
 
 CATEGORICAL_FEATURES = [

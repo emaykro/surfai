@@ -121,6 +121,7 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp, uaHints) 
     "perf_ttfb", "perf_dom_interactive", "perf_dom_content_loaded",
     "perf_load_event", "perf_transfer_size",
     "perf_long_task_count", "perf_long_task_total_ms",
+    "perf_slow_lcp", "perf_slow_inp", "perf_slow_fcp", "perf_slow_ttfb",
     // UA Client Hints (added 2026-04-10, parsed from Sec-CH-UA-* request headers)
     "uah_brand", "uah_brand_version", "uah_mobile",
     "uah_platform", "uah_platform_version",

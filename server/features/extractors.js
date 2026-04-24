@@ -477,6 +477,11 @@ function extractPerformance(events) {
     perf_transfer_size: latest.transferSize ?? null,
     perf_long_task_count: typeof latest.longTaskCount === "number" ? latest.longTaskCount : 0,
     perf_long_task_total_ms: typeof latest.longTaskTotalMs === "number" ? latest.longTaskTotalMs : 0,
+    // Google "Needs Improvement" thresholds — used as control variables in CatBoost
+    perf_slow_lcp:  typeof latest.lcp  === "number" ? latest.lcp  > 2500 : null,
+    perf_slow_inp:  typeof latest.inp  === "number" ? latest.inp  > 200  : null,
+    perf_slow_fcp:  typeof latest.fcp  === "number" ? latest.fcp  > 1800 : null,
+    perf_slow_ttfb: typeof latest.ttfb === "number" ? latest.ttfb > 800  : null,
   };
 }
 

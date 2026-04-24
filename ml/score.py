@@ -37,7 +37,24 @@ def load_model(model_path=None):
     return model
 
 
-def _fetch_batch(conn, batch_size, rescore_all):
+def _fetch_ids(conn, rescore_all):
+    """Return all session_ids that need scoring, ordered newest first."""
+    score_filter = "" if rescore_all else "AND model_prediction_score IS NULL"
+    cur = conn.cursor()
+    cur.execute(
+        f"""SELECT session_id FROM session_features
+            WHERE event_count >= %s
+              AND (is_bot IS NULL OR is_bot = false)
+              {score_filter}
+            ORDER BY computed_at DESC""",
+        (MIN_EVENT_COUNT,),
+    )
+    ids = [row[0] for row in cur.fetchall()]
+    cur.close()
+    return ids
+
+
+def _fetch_features_for_ids(conn, session_ids):
     columns = (
         ["session_id"]
         + NUMERIC_FEATURES
@@ -46,18 +63,11 @@ def _fetch_batch(conn, batch_size, rescore_all):
         + JSONB_WINDOW_COLUMNS
     )
     cols_sql = ", ".join(columns)
-    score_filter = "" if rescore_all else "AND model_prediction_score IS NULL"
-    query = f"""
-        SELECT {cols_sql}
-        FROM session_features
-        WHERE event_count >= %(min_events)s
-          AND (is_bot IS NULL OR is_bot = false)
-          {score_filter}
-        ORDER BY computed_at DESC
-        LIMIT %(batch_size)s
-    """
+    placeholders = ",".join(["%s"] * len(session_ids))
     return pd.read_sql_query(
-        query, conn, params={"min_events": MIN_EVENT_COUNT, "batch_size": batch_size}
+        f"SELECT {cols_sql} FROM session_features WHERE session_id IN ({placeholders})",
+        conn,
+        params=session_ids,
     )
 
 
@@ -99,10 +109,11 @@ def run_scoring(model_path=None, batch_size=DEFAULT_BATCH_SIZE, rescore_all=Fals
     conn = psycopg2.connect(DATABASE_URL)
     total_scored = 0
     try:
-        while True:
-            df = _fetch_batch(conn, batch_size, rescore_all)
-            if df.empty:
-                break
+        all_ids = _fetch_ids(conn, rescore_all)
+        log.info(f"Sessions to score: {len(all_ids)}")
+        for i in range(0, len(all_ids), batch_size):
+            batch_ids = all_ids[i : i + batch_size]
+            df = _fetch_features_for_ids(conn, batch_ids)
             session_ids = df["session_id"].tolist()
             df = df.drop(columns=["session_id"])
             X, _ = _preprocess(df)
@@ -110,8 +121,6 @@ def run_scoring(model_path=None, batch_size=DEFAULT_BATCH_SIZE, rescore_all=Fals
             _write_scores(conn, session_ids, scores)
             total_scored += len(session_ids)
             log.info(f"Scored batch of {len(session_ids)} (total so far: {total_scored})")
-            if len(session_ids) < batch_size:
-                break
     finally:
         conn.close()
     log.info(f"Scoring complete. Total sessions scored: {total_scored}")

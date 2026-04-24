@@ -26,7 +26,7 @@
 
 require("dotenv").config({ path: require("path").join(__dirname, "../../.env") });
 
-const pool = require("../db.js");
+const { pool } = require("../db.js");
 
 const MGMT_BASE = "https://api-metrika.yandex.net";
 const FALLBACK_TARGET = process.env.METRICA_CONVERSION_TARGET || "lead";

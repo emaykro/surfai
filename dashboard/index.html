@@ -272,6 +272,29 @@
       color: var(--green);
     }
 
+    .intent-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 5px;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      position: relative;
+    }
+    .intent-bar-fill {
+      height: 4px;
+      border-radius: 2px;
+      transition: width 0.3s;
+    }
+    .intent-label {
+      position: absolute;
+      right: 0;
+      top: -14px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
     /* Conversion filter */
     .filter-bar {
       padding: 8px 16px;
@@ -574,6 +597,7 @@
               const fData = await fRes.json();
               s.converted = fData.features.converted || false;
               s.conversion_count = fData.features.conversion_count || 0;
+              s.intent_score = fData.features.model_prediction_score ?? null;
             }
           } catch { /* ignore — features may not exist yet */ }
         }));
@@ -638,6 +662,18 @@
 
         item.appendChild(idDiv);
         item.appendChild(metaDiv);
+
+        if (s.intent_score !== null && s.intent_score !== undefined) {
+          const scoreBar = document.createElement("div");
+          scoreBar.className = "intent-bar";
+          const pct = Math.round(s.intent_score * 100);
+          const color = pct >= 70 ? "#ef4444" : pct >= 40 ? "#f59e0b" : "#6b7280";
+          scoreBar.innerHTML =
+            `<div class="intent-bar-fill" style="width:${pct}%;background:${color}"></div>` +
+            `<span class="intent-label" style="color:${color}">${pct}%</span>`;
+          item.appendChild(scoreBar);
+        }
+
         el.appendChild(item);
       });
 

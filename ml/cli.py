@@ -1,11 +1,14 @@
 """CLI entry point for SURFAI ML training pipeline."""
 
 import argparse
+import logging
 import sys
 
 from sklearn.model_selection import train_test_split
 
 from ml.config import MIN_POSITIVE_SAMPLES, RANDOM_SEED, TEST_SIZE
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
 def cmd_train(args):
@@ -103,6 +106,17 @@ def cmd_evaluate(args):
     print_report(metrics, importance)
 
 
+def cmd_score(args):
+    from ml.score import run_scoring
+
+    n = run_scoring(
+        model_path=args.model,
+        batch_size=args.batch_size,
+        rescore_all=args.all,
+    )
+    print(f"Done. Scored {n} sessions.")
+
+
 def cmd_generate_synthetic(args):
     from ml.data.synthetic import generate_synthetic_sessions
 
@@ -134,6 +148,12 @@ def main():
     p_eval.add_argument("--synthetic", action="store_true", help="Use synthetic data")
     p_eval.add_argument("--min-events", type=int, default=10)
 
+    # score
+    p_score = sub.add_parser("score", help="Score unscored sessions with the trained model")
+    p_score.add_argument("--model", default=None, help="Path to .cbm model (default: latest_model.cbm)")
+    p_score.add_argument("--batch-size", type=int, default=500, help="Sessions per batch")
+    p_score.add_argument("--all", action="store_true", help="Re-score all sessions, not just unscored ones")
+
     # generate-synthetic
     p_gen = sub.add_parser("generate-synthetic", help="Generate synthetic test data")
     p_gen.add_argument("--n", type=int, default=500, help="Number of sessions")
@@ -145,5 +165,7 @@ def main():
         cmd_train(args)
     elif args.command == "evaluate":
         cmd_evaluate(args)
+    elif args.command == "score":
+        cmd_score(args)
     elif args.command == "generate-synthetic":
         cmd_generate_synthetic(args)

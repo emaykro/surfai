@@ -100,6 +100,7 @@ BOOLEAN_FEATURES = [
 ]
 
 CATEGORICAL_FEATURES = [
+    "site_id",
     "session_time_bucket",
     "ctx_traffic_source",
     "ctx_device_type",

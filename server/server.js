@@ -303,6 +303,7 @@ const contextDataSchema = {
     utmCampaign: { type: "string" },
     utmTerm: { type: "string" },
     utmContent: { type: "string" },
+    metricaClientId: { type: ["string", "null"] },
     ts: { type: "number" },
   },
 };

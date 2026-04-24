@@ -294,3 +294,16 @@ export function getUtmParams(): {
     return empty;
   }
 }
+
+/** Read Yandex Metrica visitor ID from cookie for cross-system session matching.
+ *  Returns null if Metrica is not installed or cookie not yet set. */
+export function getMetricaClientId(): string | null {
+  try {
+    const cookie = document.cookie
+      .split("; ")
+      .find((c) => c.startsWith("_ym_uid="));
+    return cookie ? cookie.split("=")[1] ?? null : null;
+  } catch {
+    return null;
+  }
+}

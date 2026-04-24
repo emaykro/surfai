@@ -420,6 +420,7 @@ function extractContext(events) {
     ctx_utm_campaign: first.utmCampaign ?? null,
     ctx_utm_term: first.utmTerm ?? null,
     ctx_utm_content: first.utmContent ?? null,
+    metrica_client_id: first.metricaClientId ?? null,
   };
 }
 

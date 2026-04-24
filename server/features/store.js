@@ -80,6 +80,7 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp, uaHints) 
     "ctx_referrer_host",
     "ctx_utm_source", "ctx_utm_medium", "ctx_utm_campaign",
     "ctx_utm_term", "ctx_utm_content",
+    "metrica_client_id",
     // GeoIP enrichment (added 2026-04-10, populated at ingest from client IP)
     "geo_country", "geo_region", "geo_city", "geo_timezone",
     "geo_latitude", "geo_longitude",

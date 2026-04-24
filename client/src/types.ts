@@ -85,6 +85,8 @@ export interface ContextEventData {
   utmCampaign?: string;
   utmTerm?: string;
   utmContent?: string;
+  // Yandex Metrica visitor ID for cross-system session matching (optional, null if Metrica absent)
+  metricaClientId?: string | null;
   ts: number;
 }
 

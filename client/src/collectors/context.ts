@@ -18,6 +18,7 @@ import {
   getDeviceMemory,
   getReferrerHost,
   getUtmParams,
+  getMetricaClientId,
   now,
 } from "../helpers.js";
 
@@ -69,6 +70,7 @@ export class ContextCollector implements Collector {
           utmCampaign: utm.utmCampaign,
           utmTerm: utm.utmTerm,
           utmContent: utm.utmContent,
+          metricaClientId: getMetricaClientId(),
           ts: now(),
         },
       });

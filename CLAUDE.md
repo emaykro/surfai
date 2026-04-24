@@ -122,7 +122,7 @@ Every `POST /api/events` body must be:
 | `form` | `action` (focus/blur/submit/abandon), `formHash`, `fieldIndex`, `fieldType`, `fillDurationMs`, `ts` | Form interaction (no values) |
 | `engagement` | `activeMs`, `idleMs`, `maxScrollPercent`, `scrollSpeed`, `microScrolls`, `readthrough`, `ts` | Page engagement snapshot |
 | `session` | `pageCount`, `avgNavSpeedMs`, `isBounce`, `isHyperEngaged`, `timeBucket`, `ts` | Session-level signals |
-| `context` | `trafficSource`, `deviceType`, `browser`, `os`, `screenW`, `screenH`, `language`, `connectionType`, `ts` + extended optional: `timezone`, `timezoneOffset`, `languages[]`, `viewportW`, `viewportH`, `devicePixelRatio`, `colorScheme`, `reducedMotion`, `hardwareConcurrency`, `deviceMemory`, `referrerHost`, `utmSource`, `utmMedium`, `utmCampaign`, `utmTerm`, `utmContent` | Device/traffic context. Emitted once per session on start. The 16 extended fields are optional on server validation so older cached bundles still pass; the current SDK always populates them. |
+| `context` | `trafficSource`, `deviceType`, `browser`, `os`, `screenW`, `screenH`, `language`, `connectionType`, `ts` + extended optional: `timezone`, `timezoneOffset`, `languages[]`, `viewportW`, `viewportH`, `devicePixelRatio`, `colorScheme`, `reducedMotion`, `hardwareConcurrency`, `deviceMemory`, `referrerHost`, `utmSource`, `utmMedium`, `utmCampaign`, `utmTerm`, `utmContent`, `metricaClientId` | Device/traffic context. Emitted once per session on start. All extended fields are optional on server validation so older cached bundles still pass; the current SDK always populates them. `metricaClientId` is the `_ym_uid` cookie value for cross-system Metrica matching (null if Metrica not installed). |
 | `cross_session` | `visitorId`, `visitNumber`, `returnWithin24h`, `returnWithin7d`, `ts` | Cross-session tracking |
 | `goal` | `goalId`, `value?`, `metadata?`, `ts` | Conversion goal event |
 | `bot_signals` | `webdriver`, `phantom`, `nightmare`, `selenium`, `cdp`, `pluginCount`, `languageCount`, `hasChrome`, `notificationPermission`, `hardwareConcurrency`, `deviceMemory`, `touchSupport`, `screenColorDepth`, `ts` | Bot/automation fingerprint signals |
@@ -207,6 +207,8 @@ Phases 1–6 complete. Bot detection layer deployed 2026-04-08. Telemetry reliab
 | 012 | `performance_event_type.sql` | `performance` in `events_type_check` + 12 `perf_*` columns (LCP, CLS, ...) |
 | 013 | `ua_client_hints.sql` | 8 `uah_*` columns (brand, mobile, platform, model, arch, ...) |
 | 014 | `yandex_metrica.sql` | `sites.yandex_counter_id` (nullable BIGINT) + `metrica_daily_reconciliation` table. Pre-populates counter IDs for the 5 prod sites. Slice 1 of the Metrica enrichment plan (see `vault/decisions/2026-04-19_yandex_metrica_enrichment.md`). |
+| 015 | `model_scoring.sql` | `model_prediction_score` (DOUBLE PRECISION) + `model_scored_at` (TIMESTAMPTZ) on `session_features`. Populated by `python3 -m ml score` (systemd timer every 5 min). |
+| 016 | `metrica_client_id.sql` | `metrica_client_id` TEXT on `session_features`. Populated from `context` event's `metricaClientId` field (`_ym_uid` cookie). For cross-system Metrica matching. |
 
 **Critical rule:** any new `events.type` value requires updating `events_type_check` in a migration in the SAME commit as the SDK change. Otherwise atomic `persistBatch` will reject every batch containing the new type. Learned from the 2026-04-08 incident — see `vault/bugs/2026-04-10 context and session event loss.md`.
 

@@ -226,6 +226,7 @@ function extractClicks(events) {
 
   // Rage click detection: sliding window of recent clicks
   const recentClicks = []; // [{x, y, ts}]
+  let inRageSequence = false; // prevents overcounting clicks 4,5,... of the same incident
 
   for (let i = 0; i < events.length; i++) {
     const { x, y, ts, isCta, isExternal } = events[i].data;
@@ -243,18 +244,24 @@ function extractClicks(events) {
     const gridKey = `${Math.floor(x / CLUSTER_RADIUS)},${Math.floor(y / CLUSTER_RADIUS)}`;
     clusterMap.set(gridKey, (clusterMap.get(gridKey) || 0) + 1);
 
-    // Rage click: 3+ clicks within 500ms in roughly same area (100px)
+    // Rage click: 3+ clicks within 500ms in the same ~100px area.
+    // Count distinct incidents only (not every extra click in the same burst).
     recentClicks.push({ x, y, ts });
-    // Remove clicks older than 500ms
     while (recentClicks.length > 0 && ts - recentClicks[0].ts > 500) {
       recentClicks.shift();
     }
     if (recentClicks.length >= 3) {
-      // Check if all recent clicks are within 100px of each other
       const allClose = recentClicks.every(
         (c) => Math.abs(c.x - x) < 100 && Math.abs(c.y - y) < 100
       );
-      if (allClose) rageCount++;
+      if (allClose && !inRageSequence) {
+        rageCount++;
+        inRageSequence = true;
+      } else if (!allClose) {
+        inRageSequence = false;
+      }
+    } else {
+      inRageSequence = false;
     }
   }
 

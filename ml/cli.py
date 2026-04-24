@@ -14,6 +14,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 def cmd_train(args):
     from ml.data.preprocessing import prepare_features
     from ml.training.evaluation import (
+        calibrate_model,
+        calibration_metrics,
         evaluate_model,
         get_feature_importance,
         print_report,
@@ -73,8 +75,13 @@ def cmd_train(args):
     metrics["target_column"] = args.target
     metrics["min_events_filter"] = args.min_events
 
-    print_report(metrics, importance)
-    save_artifacts(model, metrics, importance, args.output_dir)
+    # Calibration — fit isotonic regression on validation predictions.
+    # Saved alongside model so score.py can apply it before writing to DB.
+    calibrator = calibrate_model(model, X_val, y_val)
+    cal_metrics = calibration_metrics(model, X_val, y_val, calibrator=calibrator)
+
+    print_report(metrics, importance, cal_metrics)
+    save_artifacts(model, metrics, importance, calibrator=calibrator, cal_metrics=cal_metrics, output_dir=args.output_dir)
 
 
 def cmd_evaluate(args):

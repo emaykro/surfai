@@ -41,11 +41,12 @@ cabinet/           Operator cabinet (vanilla JS, zero deps)
   js/app.js          Hash router, API calls, views
   css/style.css      Dark theme styling
 ml/                Python CatBoost training pipeline
-  config.py          Feature lists, CatBoost params, DB config
-  cli.py             CLI: train | evaluate | generate-synthetic
-  data/              Data loading, preprocessing, synthetic generator
-  training/          CatBoost trainer, evaluation, artifact saving
-  artifacts/         Trained models (.cbm), metrics, importance (gitignored)
+  config.py          Feature lists, CatBoost params, DB config, MIN_SITE_CONVERSIONS
+  cli.py             CLI: train | evaluate | score | generate-synthetic
+  data/              Data loading (joins projects for vertical), preprocessing, synthetic generator
+  training/          CatBoost trainer, evaluation + calibration (isotonic regression), artifact saving
+  score.py           Batch scorer: applies calibrator, logs cold-start sites
+  artifacts/         Trained models (.cbm), calibrators (.pkl), metrics, importance (gitignored)
 .cursor/rules/     Cursor IDE rule files (synced with CLAUDE.md via meta-sync protocol)
 .cursor/mcp.json   Cursor MCP server config (fetch, puppeteer, memory)
 .mcp.json          Claude Code MCP server config (postgres, puppeteer, memory)
@@ -93,9 +94,11 @@ npm test                 # client: vitest, server: node --test
 # ML pipeline
 pip3 install -r ml/requirements.txt   # one-time setup
 python3 -m ml train --synthetic       # smoke test on fake data
-python3 -m ml train                   # train on real DB data
+python3 -m ml train                   # train on real DB data (also fits + saves calibrator)
 python3 -m ml evaluate --model ml/artifacts/latest_model.cbm
 python3 -m ml generate-synthetic --n 1000 --output data.csv
+# train outputs: latest_model.cbm + latest_calibrator.pkl (isotonic regression)
+# score.py applies calibrator automatically if present
 ```
 
 ## Event Data Contract (single source of truth)
@@ -225,6 +228,32 @@ Phases 1–6 complete. Bot detection layer deployed 2026-04-08. Telemetry reliab
 - CORS must be explicit — never leave ingest open to `*` in production.
 - All network calls from SDK must be non-blocking (`fetch keepalive` or `sendBeacon`).
 - SDK must silently drop on failure; never throw into the host page.
+
+## ML Architecture
+
+### Multi-niche, fast cold-start design
+
+The platform is designed to serve businesses across different verticals (services, e-commerce, SaaS, media, real estate, etc.) including new sites with zero historical conversions.
+
+**`vertical` feature** — derived at load/score time via JOIN on `projects.vertical`. Lets the global model carry patterns from already-seen niches to a new site in the same niche from day one. Never add `vertical` as a denormalized column to `session_features` — always JOIN.
+
+**Cold-start threshold** — `MIN_SITE_CONVERSIONS = 30` (in `config.py`). Below this, score.py uses the global model (trained on all sites). Above this, the site has enough data for a site-specific fine-tuning pass. Logged at score time so operators can track graduation.
+
+**Two-tier scoring (current → future)**:
+- Tier 1 (now): one global CatBoost model, `site_id` + `vertical` as categorical features, trained on all sites. CatBoost handles NaN natively (sparse enrichment columns fine).
+- Tier 2 (future): per-site fine-tuned model loaded by site-specific path; score.py checks conversion count and picks the right model.
+
+### Calibration
+
+Raw CatBoost probabilities are well-ranked (high AUC) but not guaranteed to be well-calibrated — `predict_proba=0.7` may not correspond to 70% actual conversions. This matters critically for synthetic conversions: if we report inflated probabilities to GA4/Metrika, the ad platform optimizes toward a signal that doesn't represent real intent.
+
+`training/evaluation.py:calibrate_model()` fits an isotonic regression on the validation set and saves it as `latest_calibrator.pkl`. `score.py` applies it automatically if present. `calibration_metrics()` reports ECE (Expected Calibration Error) before and after — lower is better, 0 = perfect.
+
+**Rule:** always retrain the calibrator together with the model. A stale calibrator fitted on old validation data is worse than no calibrator.
+
+### Feature columns
+
+`FEATURE_COLUMNS` in `config.py` is append-only. Removing a column name invalidates existing `.cbm` artifacts. Leave a comment if retiring a feature; drop the column only after a new model is trained and deployed.
 
 ## Engineering Discipline
 

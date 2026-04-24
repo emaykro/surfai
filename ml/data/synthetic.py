@@ -34,6 +34,8 @@ def _make_window_array(n_windows, base_value, noise_scale=0.1):
 
 
 _CATEGORICAL_VALUES = {
+    "vertical": ["services", "ecommerce", "saas", "media", "real_estate"],
+    "site_id": ["site_a", "site_b", "site_c", "site_d"],
     "session_time_bucket": ["night", "morning", "day", "evening"],
     "ctx_traffic_source": ["direct", "organic", "referral", "social", "paid"],
     "ctx_device_type": ["desktop", "mobile", "tablet"],
@@ -137,9 +139,10 @@ def generate_synthetic_sessions(n=500, conversion_rate=0.15):
             else:
                 row[feat] = bool(rng.random() < 0.3)
 
-        # Categorical features
+        # Categorical features — use known values list or a generic placeholder
+        _FALLBACK_CAT = ["__missing__", "value_a", "value_b", "value_c"]
         for feat in CATEGORICAL_FEATURES:
-            values = _CATEGORICAL_VALUES[feat]
+            values = _CATEGORICAL_VALUES.get(feat, _FALLBACK_CAT)
             row[feat] = rng.choice(values)
 
         # JSONB window columns

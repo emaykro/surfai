@@ -13,6 +13,10 @@ TEST_SIZE = 0.2
 RANDOM_SEED = 42
 MIN_POSITIVE_SAMPLES = 10
 
+# Minimum site-specific conversions before the scorer trusts a site-level model.
+# Below this threshold the global base model is used (cold-start path).
+MIN_SITE_CONVERSIONS = 30
+
 # --- Feature column lists (must match session_features table) ---
 
 NUMERIC_FEATURES = [
@@ -100,6 +104,7 @@ BOOLEAN_FEATURES = [
 ]
 
 CATEGORICAL_FEATURES = [
+    "vertical",          # project vertical — enables cross-niche transfer
     "site_id",
     "session_time_bucket",
     "ctx_traffic_source",

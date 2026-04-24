@@ -17,6 +17,36 @@ MIN_POSITIVE_SAMPLES = 10
 # Below this threshold the global base model is used (cold-start path).
 MIN_SITE_CONVERSIONS = 30
 
+# --- Behavioral clustering (k-means) ---
+
+K_CLUSTERS = 5  # number of behavioral archetypes
+
+# Purely behavioral features for k-means — no context / geo / performance.
+# These columns must exist in session_features.
+CLUSTER_FEATURES = [
+    "engagement_active_ratio",
+    "engagement_max_scroll",
+    "engagement_micro_scrolls",
+    "scroll_max_depth",
+    "scroll_direction_changes",
+    "scroll_pause_count",
+    "click_total",
+    "click_cta_ratio",
+    "click_rage_count",
+    "form_total_interactions",
+    "form_correction_count",
+    "form_submit_count",
+    "form_abandon_count",
+    "session_duration_ms",
+    "session_is_bounce",
+    "session_is_hyper",
+    "mouse_avg_velocity",
+    "mouse_avg_jitter",
+    "mouse_avg_curvature",
+    "copy_count",
+    "tab_blur_count",
+]
+
 # --- Feature column lists (must match session_features table) ---
 
 NUMERIC_FEATURES = [
@@ -117,6 +147,7 @@ BOOLEAN_FEATURES = [
 CATEGORICAL_FEATURES = [
     "vertical",          # project vertical — enables cross-niche transfer
     "site_id",
+    "behavior_cluster",  # k-means archetype label (added 2026-04-25); __missing__ until cluster job runs
     "session_time_bucket",
     "ctx_traffic_source",
     "ctx_device_type",

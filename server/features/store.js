@@ -139,6 +139,8 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp, uaHints) 
     // Return-visit engagement delta (added 2026-04-25)
     "engagement_delta_ms",
     "engagement_delta_ratio",
+    // Behavioral cluster label (added 2026-04-25, assigned by `python3 -m ml cluster`)
+    "behavior_cluster",
   ];
 
   for (const col of FEATURE_COLUMNS) {

@@ -124,6 +124,13 @@ def cmd_score(args):
     print(f"Done. Scored {n} sessions.")
 
 
+def cmd_cluster(args):
+    from ml.clustering import run_clustering
+
+    n = run_clustering(k=args.k, recluster_all=args.all)
+    print(f"Done. Assigned behavior_cluster for {n} sessions.")
+
+
 def cmd_generate_synthetic(args):
     from ml.data.synthetic import generate_synthetic_sessions
 
@@ -161,6 +168,11 @@ def main():
     p_score.add_argument("--batch-size", type=int, default=500, help="Sessions per batch")
     p_score.add_argument("--all", action="store_true", help="Re-score all sessions, not just unscored ones")
 
+    # cluster
+    p_cluster = sub.add_parser("cluster", help="Assign behavioral k-means cluster labels")
+    p_cluster.add_argument("--k", type=int, default=None, help="Number of clusters (default: K_CLUSTERS from config)")
+    p_cluster.add_argument("--all", action="store_true", help="Re-cluster already-labelled sessions")
+
     # generate-synthetic
     p_gen = sub.add_parser("generate-synthetic", help="Generate synthetic test data")
     p_gen.add_argument("--n", type=int, default=500, help="Number of sessions")
@@ -174,5 +186,10 @@ def main():
         cmd_evaluate(args)
     elif args.command == "score":
         cmd_score(args)
+    elif args.command == "cluster":
+        from ml.config import K_CLUSTERS
+        k = args.k if args.k is not None else K_CLUSTERS
+        args.k = k
+        cmd_cluster(args)
     elif args.command == "generate-synthetic":
         cmd_generate_synthetic(args)

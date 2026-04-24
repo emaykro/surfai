@@ -2,45 +2,8 @@ import type { Collector } from "../types.js";
 import type { SurfaiTracker } from "../tracker.js";
 import { now } from "../helpers.js";
 
-/**
- * Performance / Web Vitals collector.
- *
- * Collects Core Web Vitals (LCP, CLS, FCP, FID, INP), Navigation Timing
- * (TTFB, domContentLoaded, loadEvent, transferSize) and Long Task counts
- * during the session via PerformanceObserver, then emits one summary
- * `performance` event via the tracker's beforeFlush() hook.
- *
- * Emit strategy (same lesson learned from SessionCollector on 2026-04-10):
- * unload lifecycle events are unreliable in real browsers, so we don't
- * rely on them alone. PerformanceCollector emits up to three snapshots
- * per session:
- *
- *   1. Early snapshot at 5s — catches bounce sessions shorter than any
- *      lifecycle event. Ships via the regular 5s fetch flushInterval.
- *      Data is PARTIAL at this point — LCP may still be a candidate, CLS
- *      is just beginning to accumulate.
- *   2. Second snapshot at 20s — longer sessions where LCP has usually
- *      stabilized and more CLS shifts have been observed.
- *   3. Final snapshot via beforeFlush() on unload — BEST case, but may
- *      not fire on mobile browsers or in bfcache scenarios.
- *
- * Each emit creates a NEW `performance` event with the current state.
- * The server-side extractor (extractPerformance) takes the LATEST event,
- * so the most complete snapshot wins even when earlier ones arrive.
- *
- * Zero runtime deps. Gracefully degrades if PerformanceObserver or a
- * specific entry type is not supported (old browsers, Safari quirks).
- *
- * CLS uses the session-window algorithm (the one web.dev recommends):
- *   - A new session window starts after 1s of no shifts OR when the
- *     current window has been open for 5s.
- *   - Final CLS = max sum of shifts within any single window.
- *
- * INP uses a simplified approximation: max interaction duration across
- * all recorded first-input + event-timing entries. Not identical to the
- * official P98 calculation but captures the worst case, which is the
- * value most correlated with user frustration.
- */
+// Web Vitals + Navigation Timing collector. Emits up to 3 snapshots per session
+// (5s, 20s, beforeFlush) so data lands even when lifecycle events don't fire.
 
 interface LayoutShiftEntry extends PerformanceEntry {
   value: number;
@@ -133,22 +96,10 @@ export class PerformanceCollector implements Collector {
     }
   }
 
-  /**
-   * Called by tracker right before the buffer is drained on unload.
-   * Emits one final `performance` event with the latest accumulated
-   * metrics. If earlier snapshots from the 5s / 20s timers already fired,
-   * the server-side extractor takes the last one — this final one is the
-   * most complete.
-   */
   beforeFlush(): void {
     this.emitSnapshot();
   }
 
-  /**
-   * Push a `performance` event with the current accumulated metrics.
-   * NOT idempotent — each call creates a new event. Multiple snapshots
-   * per session are expected and the extractor picks the last one.
-   */
   private emitSnapshot(): void {
     try {
       const nav = this.readNavigationTiming();

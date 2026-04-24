@@ -1,0 +1,73 @@
+---
+description: Engineering discipline for SURFAI — pre-flight checklists, surgical change rules, and goal-driven verification. Mirrors the Engineering Discipline section of CLAUDE.md.
+globs: ["**/*.ts", "**/*.js", "**/*.py", "server/migrations/*.sql"]
+---
+
+# Engineering Discipline (SURFAI)
+
+Adapted from Karpathy's AI coding principles, grounded in SURFAI's real incidents.
+
+## Think Before Coding
+
+**For any non-trivial request, state your interpretation before writing code.**
+If a feature can live at multiple layers, name your choice and the reason. SURFAI layer preference (cheapest first): DB-only derivation → server enrichment → optional field on existing event → new event type + collector.
+
+For decisions that affect architecture or schema, create `vault/decisions/YYYY-MM-DD-<title>.md` **before** implementation.
+
+**Before touching the event schema:**
+- New `events.type`? → migration (`events_type_check`) + SDK (`types.ts`) in **one commit**. Root cause of 2026-04-08 production incident.
+- New fields on existing type? → mark **optional** on server JSON Schema so older cached SDKs still pass.
+- New `session_features` column? → state fill rate expectation + whether it enters `FEATURE_COLUMNS` before writing code.
+
+**Before adding a collector:**
+- Can this be derived server-side? Server-side = zero client delivery risk.
+- One-shot critical events (`context`, `bot_signals`, `performance`) → use `beforeFlush()`, never `requestIdleCallback`.
+
+**Before touching the ML pipeline:**
+- State the current AUC baseline (v3 reference: 0.9785). Regressions must be justified.
+- Feature add/remove/rename → `extractors.js` + `ml/config.py:FEATURE_COLUMNS` in the same commit.
+
+## Simplicity First
+
+- Signal computable server-side → don't add a client collector.
+- New collector: stay under ~80 lines.
+- `session_features` column with no `FEATURE_COLUMNS` entry = schema bloat. Don't create it until ML is ready.
+
+## Surgical Changes
+
+Three append-only invariants — never edit in place:
+1. `server/migrations/*.sql` — new numbered file only.
+2. `events_type_check` constraint — only add values; never remove or rename.
+3. `ml/config.py:FEATURE_COLUMNS` — comment removed entries; removal invalidates existing `.cbm` artifacts.
+
+When fixing a bug: don't clean up adjacent code in the same commit unless it caused the bug.
+
+**Universal test:** every changed line in the diff must trace to the stated request. Noticed something unrelated? Mention it — don't fix it. Don't add new `require()`/`import` as a side-effect of a bugfix.
+
+## Goal-Driven Verification
+
+"Deployed" = verified against these criteria:
+
+**SDK change:**
+```bash
+grep -c 'NewClass\|newField' client/dist/tracker.js   # > 0
+wc -c client/dist/tracker.js                          # 20–30 KB expected
+```
+
+**Migration:**
+```sql
+SELECT column_name FROM information_schema.columns
+WHERE table_name = 'session_features' AND column_name = 'new_col';
+```
+
+**Fill rate (24 h after deploy):**
+```sql
+SELECT COUNT(*) FILTER (WHERE new_col IS NOT NULL)::float / NULLIF(COUNT(*), 0)
+FROM session_features WHERE created_at > NOW() - INTERVAL '24 hours';
+-- > 0.5 behavioral; > 0.2 optional context
+```
+
+**ML scoring live:**
+```bash
+journalctl -u surfai-ml-score.timer --since "10 min ago" | grep -c 'scored'
+```

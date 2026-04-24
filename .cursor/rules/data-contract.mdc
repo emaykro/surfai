@@ -27,7 +27,7 @@ alwaysApply: false
   - `form` -> `{action, formHash, fieldIndex, fieldType, fillDurationMs, ts}`
   - `engagement` -> `{activeMs, idleMs, maxScrollPercent, scrollSpeed, microScrolls, readthrough, ts}`
   - `session` -> `{pageCount, avgNavSpeedMs, isBounce, isHyperEngaged, timeBucket, ts}`
-  - `context` -> `{trafficSource, deviceType, browser, os, screenW, screenH, language, connectionType, ts}` plus the extended optional fields `{timezone, timezoneOffset, languages[], viewportW, viewportH, devicePixelRatio, colorScheme, reducedMotion, hardwareConcurrency, deviceMemory, referrerHost, utmSource, utmMedium, utmCampaign, utmTerm, utmContent}` (added 2026-04-10; optional on server to keep old cached bundles valid)
+  - `context` -> `{trafficSource, deviceType, browser, os, screenW, screenH, language, connectionType, ts}` plus the extended optional fields `{timezone, timezoneOffset, languages[], viewportW, viewportH, devicePixelRatio, colorScheme, reducedMotion, hardwareConcurrency, deviceMemory, referrerHost, utmSource, utmMedium, utmCampaign, utmTerm, utmContent, metricaClientId}` (optional on server to keep old cached bundles valid; extended fields added 2026-04-10, `metricaClientId` added 2026-04-24 — `_ym_uid` cookie value for cross-system Metrica matching, null if Metrica not installed)
   - `cross_session` -> `{visitorId, visitNumber, returnWithin24h, returnWithin7d, ts}`
 - Phase 5 (Goal) event shape:
   - `goal` -> `{goalId, value?, metadata?, ts}` — conversion event; deduped within 5s per goalId+session

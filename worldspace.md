@@ -1,6 +1,6 @@
 # SURFAI — Predictive Behavioral Analytics Platform
 
-> Last updated: 2026-04-10 (evening). This file is a quick-reference map of the project for humans and AI agents. Authoritative details live in `CLAUDE.md`, `vault/decisions/`, and the per-package `client/CLAUDE.md` / `server/CLAUDE.md`.
+> Last updated: 2026-04-24. This file is a quick-reference map of the project for humans and AI agents. Authoritative details live in `CLAUDE.md`, `vault/decisions/`, and the per-package `client/CLAUDE.md` / `server/CLAUDE.md`.
 
 ## Vision
 
@@ -10,8 +10,7 @@ Operator-managed predictive analytics for paid-traffic SaaS. We collect behavior
 
 **Operating model:** internal team runs all projects. No client self-serve yet; onboarding is manual via GTM.
 
-## Platform Status (2026-04-10)
-
+## Platform Status (2026-04-24)
 | Layer | Status |
 |---|---|
 | **Phase 1 — Persistence & SDK hardening** | ✅ Complete |
@@ -21,7 +20,8 @@ Operator-managed predictive analytics for paid-traffic SaaS. We collect behavior
 | **Phase 5 — ML training pipeline** (CatBoost, first real training done 2026-04-08, AUC 0.91) | ✅ Complete |
 | **Phase 6 — Multi-project data model & operator cabinet** | ✅ Complete |
 | **Phase 6.5 — Data enrichment sprint** (bot detection, extended context, GeoIP, Web Vitals, UA Client Hints) | ✅ Done 2026-04-10 |
-| **Phase 7 — Hierarchical ML + retrain on enriched features** | 🟡 Waiting on more conversions (~28 so far, need ~50+) |
+| **Phase 6.6 — Yandex Metrica integration** (reconciliation + `metricaClientId` capture + Offline Conversions push) | ✅ Done 2026-04-24 |
+| **Phase 7 — Live ML scoring** (CatBoost v3 site-aware, AUC 0.9785, 5-min systemd timer) | 🟡 Scoring live; **retrain on enriched features** blocked on ~50+ conversions |
 | **Phase 8 — Predictive export to GA4/Metrika** | ⏳ Not started |
 | **Phase 9 — Hardening** | ⏳ Not started |
 | **Phase 10 — Public SaaS** | ⏳ Not started |
@@ -48,21 +48,22 @@ Master roadmap: `vault/decisions/2026-04-02_long_term_development_roadmap.md`.
 | дома-из-теплостен.рф | page rule `/thank-you` |
 | химчистка-луч.рф | page rule `/thank-you` |
 
-**Data volume (as of 2026-04-10 evening):**
-- ~450–500 sessions/day, >730k events total
-- ~2,800 sessions in `session_features`
-- 28 real conversions (need ~50+ for a robust retrain on the enlarged feature set)
-- Historical sessions before 2026-04-10 keep NULL for `ctx_*` extended fields, `geo_*`, `perf_*`, and `uah_*` — no backfill possible. CatBoost handles NaN natively.
+**Data volume (as of 2026-04-24, prod estimates):**
+- ~450–500 sessions/day, >1.4M events total
+- ~9,800+ sessions in `session_features`; all scored by v3 model every 5 min
+- ~28–50 real conversions (need ~50+ for retrain on enriched feature set — check prod for exact count)
+- Historical sessions before 2026-04-10 keep NULL for `ctx_*`, `geo_*`, `perf_*`, `uah_*` — no backfill possible; CatBoost handles NaN natively
+- `metrica_client_id` populated for sessions where `_ym_uid` cookie is present (Metrica installed on client site)
 
 ## Tech Stack
 
 | Layer | Tech | Notes |
 |---|---|---|
-| Browser SDK | Vanilla TypeScript ES6, zero runtime deps | `client/` — 8 collectors, compiled via `tsc` + bundled via `esbuild` (IIFE), ~47 kb gzipped |
+| Browser SDK | Vanilla TypeScript ES6, zero runtime deps | `client/` — 8 collectors, compiled via `tsc` + bundled via `esbuild` (IIFE), ~25 KB (uncompressed); build: `npm run build` from repo root |
 | Ingest server | Node.js + Fastify (CommonJS) | `server/` — JSON Schema on every route, `pg.Pool`, Pino logs, `trustProxy: "127.0.0.1"` |
 | Feature store | PostgreSQL `session_features` table | ~103 ML features across behavioral / context / geo / perf / ua-ch dimensions |
 | GeoIP | `maxmind@5` + `@ip-location-db/dbip-city-mmdb` + `@ip-location-db/asn-mmdb` (~150 MB) | Server-side lookup at ingest; raw IP never stored |
-| ML training | Python 3 + CatBoost | `ml/` — CLI entry `python3 -m ml train`, AUC 0.91 on first real-data run 2026-04-08 |
+| ML training | Python 3 + CatBoost | `ml/` — CLI entry `python3 -m ml train`; v3 site-aware model deployed, AUC 0.9785; live scoring via `python3 -m ml score` (systemd timer every 5 min) |
 | Dashboard | Vanilla JS, zero deps | `dashboard/` — session list, live SSE feed, replay |
 | Operator cabinet | Vanilla JS SPA | `cabinet/` — project CRUD, site onboarding, snippet copy, goals |
 
@@ -87,7 +88,7 @@ Full details: `CLAUDE.md` at repo root.
 
 ## Agents Working on This Project
 
-1. **Claude Code (CLI, Opus 4.6)** — architecture, backend, SDK, ML pipeline, operations
+1. **Claude Code (CLI, Opus 4.7)** — architecture, backend, SDK, ML pipeline, operations
 2. **Cursor (IDE)** — real-time edits, UI polish
 3. **Human operator (Artur)** — direction, priorities, prod access
 

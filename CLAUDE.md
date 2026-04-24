@@ -222,6 +222,94 @@ Phases 1–6 complete. Bot detection layer deployed 2026-04-08. Telemetry reliab
 - All network calls from SDK must be non-blocking (`fetch keepalive` or `sendBeacon`).
 - SDK must silently drop on failure; never throw into the host page.
 
+## Engineering Discipline
+
+These principles are adapted from Karpathy's observations about AI-assisted coding and grounded in SURFAI's own incidents. Both Claude Code and Cursor must follow them.
+
+### Think Before Coding
+
+**For any non-trivial request, state your interpretation before writing code.**
+If a feature can be implemented at multiple layers, name the layer you chose and why — don't pick silently. If two valid approaches exist, present the tradeoff in 2–3 sentences and wait for confirmation.
+
+SURFAI layer preference (cheapest/safest first):
+1. Derive from data already in the DB — no code change at all
+2. Server-side enrichment from existing events — no SDK change
+3. Add an optional field to an existing event type
+4. New SDK collector + new event type — most expensive (triggers schema rule below)
+
+If a decision affects architecture, schema, or deployment, create `vault/decisions/YYYY-MM-DD-<title>.md` **before** implementation, not after. This converts the vault from a retrospective log into a genuine thinking tool.
+
+**Before touching the event schema:**
+- New `events.type`? → migration (`events_type_check` update) + SDK (`types.ts`) must land in **one commit**. Skipping this breaks every batch in production that contains the new type. Root cause of 2026-04-08 incident.
+- New fields on an existing type? → make them **optional** on the server JSON Schema so older cached SDK builds (TTL ~1 h) still pass validation.
+- New `session_features` column? → answer before proceeding: (1) expected fill rate; (2) will it enter `FEATURE_COLUMNS`? (3) if fill rate < 20 %, is sparsity acceptable for training?
+
+**Before adding a collector:**
+- Can this signal be derived server-side from data already in the DB (timestamps, UA string, IP)? Server-side = zero client delivery risk.
+- Does it need a new event type? If yes, follow the schema rule above.
+- One-shot critical events (`context`, `bot_signals`, `performance`) must not use `requestIdleCallback` — use `beforeFlush()` for guaranteed delivery.
+
+**Before touching the ML pipeline:**
+- State the current AUC baseline before any change (v3 site-aware reference: 0.9785). Changes that drop AUC must be explicitly justified.
+- Adding / removing / renaming a feature? → `server/features/extractors.js` and `ml/config.py:FEATURE_COLUMNS` in the **same commit**.
+- Retrain required? Check first: `SELECT COUNT(*) FROM conversions c JOIN session_features sf USING(session_id) WHERE sf.new_column IS NOT NULL` — need ≥ 50 real conversions on the new feature set.
+
+### Simplicity First
+
+- If a signal can be computed server-side from data already in the DB, don't add a new SDK collector for it.
+- New collectors should stay under ~80 lines. Exceeding that is a scope signal.
+- A `session_features` column with no corresponding `FEATURE_COLUMNS` entry is schema bloat — add the column only when the ML side is ready to consume it.
+- Don't introduce server-side enrichment that is O(sessions × events) per ingest request without benchmarking the cost on the current 500 sessions/day load.
+
+### Surgical Changes
+
+Three things in this project are **append-only** — never modify in place:
+
+1. **Migration files** (`server/migrations/*.sql`) — add a new numbered file; never edit an existing one.
+2. **`events_type_check` constraint** — only add values; never remove or rename (would break replay of historical raw batches).
+3. **`FEATURE_COLUMNS` in `ml/config.py`** — removing a column name invalidates existing `.cbm` artifacts; leave a comment if removing.
+
+When fixing a bug in one extractor or collector:
+- Don't "clean up" adjacent code in the same commit unless it directly caused the bug.
+- Don't rename event fields or DB columns as a side-effect — that's a migration + SDK change, not a bugfix.
+
+**Universal test for any code change:** every line you touch in the diff must trace directly to the stated request. If you notice unrelated dead code, a naming inconsistency, or a refactoring opportunity — mention it in your response, don't silently fix it. Don't add new `require()`/`import` statements as a side-effect of a bugfix.
+
+### Goal-Driven Verification
+
+"Deployed" means nothing until verified against concrete criteria. Run the matching check after every change:
+
+**SDK / collector change:**
+```bash
+# Collector and new field present in bundle
+grep -c 'NewCollectorClass\|newFieldName' client/dist/tracker.js
+# Bundle size still sane (expect 20–30 KB for current collector set)
+wc -c client/dist/tracker.js
+```
+
+**Migration applied:**
+```sql
+-- Column present
+SELECT column_name FROM information_schema.columns
+WHERE table_name = 'session_features' AND column_name = 'new_col';
+```
+
+**New feature column fill rate (run 24 h after deploy):**
+```sql
+SELECT
+  COUNT(*) FILTER (WHERE new_col IS NOT NULL)::float / NULLIF(COUNT(*), 0) AS fill_rate
+FROM session_features
+WHERE created_at > NOW() - INTERVAL '24 hours';
+-- Expect: > 0.5 for behavioral signals; > 0.2 for optional context fields
+```
+
+**ML scoring live:**
+```bash
+journalctl -u surfai-ml-score.timer --since "10 min ago" | grep -c 'scored'
+# and
+psql surfai -c "SELECT COUNT(*) FROM session_features WHERE model_scored_at > NOW() - INTERVAL '10 minutes';"
+```
+
 ## Meta-Sync Protocol (Claude Code ↔ Cursor)
 
 This project is co-maintained by two AI agents: **Claude Code** (CLI) and **Cursor** (IDE).
@@ -231,10 +319,13 @@ or alter build steps, you **MUST** update the corresponding `.mdc` files inside 
 - `data-contract.mdc` — if the event schema changed.
 - `sdk-constraints.mdc` — if SDK behavior, batch limits, or security rules changed.
 - `backend-fastify.mdc` — if server routes, validation, logging, or CORS config changed.
+- `engineering-discipline.mdc` — if the Engineering Discipline section changed (pre-flight checklists, verification criteria, surgical rules).
 - `meta-sync.mdc` — if the sync protocol itself needs amendment.
 
 Cursor has the reciprocal obligation: any change it makes must be reflected back into
 `CLAUDE.md` (root and sub-packages). See `.cursor/rules/meta-sync.mdc` for the full protocol.
+
+**Surgical update rule:** when updating `.mdc` files, edit only the sections that changed — don't rewrite the whole file. The resulting diff must be readable in 30 seconds. The same Engineering Discipline rules (surgical changes, think before coding, goal-driven verification) apply to Cursor's own code edits, not only to metadata sync.
 
 ## Vault Workflow (persistent context layer)
 

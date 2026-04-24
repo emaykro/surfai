@@ -597,26 +597,50 @@ fastify.get("/api/events/live", { preHandler: [requireOperatorAuth] }, (request,
 
 // ---------------------------------------------------------------------------
 // GET /api/sessions — list sessions (dashboard)
+// Supports dimension filters: traffic_source, country, device_type, bot_risk
 // ---------------------------------------------------------------------------
 
 fastify.get("/api/sessions", { preHandler: [requireOperatorAuth] }, async (request) => {
   const limit = Math.min(parseInt(request.query.limit, 10) || 50, 200);
   const offset = Math.max(parseInt(request.query.offset, 10) || 0, 0);
-  const projectId = request.query.project_id;
+  const { project_id, traffic_source, country, device_type, bot_risk } = request.query;
 
-  let whereClause = "";
-  const params = [limit, offset];
+  const conditions = [];
+  const params = [limit, offset]; // $1, $2
 
-  if (projectId) {
-    whereClause = "WHERE s.project_id = $3";
-    params.push(projectId);
+  if (project_id) {
+    params.push(project_id);
+    conditions.push(`s.project_id = $${params.length}`);
   }
+
+  const dimFilters = [];
+  if (traffic_source) {
+    params.push(traffic_source);
+    dimFilters.push(`COALESCE(sf.ctx_traffic_source, 'unknown') = $${params.length}`);
+  }
+  if (country) {
+    params.push(country);
+    dimFilters.push(`COALESCE(sf.geo_country, 'unknown') = $${params.length}`);
+  }
+  if (device_type) {
+    params.push(device_type);
+    dimFilters.push(`COALESCE(sf.ctx_device_type, 'unknown') = $${params.length}`);
+  }
+  if (bot_risk) {
+    params.push(bot_risk);
+    dimFilters.push(`COALESCE(sf.bot_risk_level, 'unknown') = $${params.length}`);
+  }
+
+  conditions.push(...dimFilters);
+  const needsFeatureJoin = dimFilters.length > 0;
+  const whereClause = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
 
   const { rows } = await pool.query(
     `SELECT s.session_id, s.first_seen_at, s.last_seen_at, s.project_id, s.site_id,
             COUNT(e.id)::int AS event_count
      FROM sessions s
      LEFT JOIN events e ON e.session_id = s.session_id
+     ${needsFeatureJoin ? "LEFT JOIN session_features sf ON sf.session_id = s.session_id" : ""}
      ${whereClause}
      GROUP BY s.id
      ORDER BY s.last_seen_at DESC
@@ -625,6 +649,76 @@ fastify.get("/api/sessions", { preHandler: [requireOperatorAuth] }, async (reque
   );
 
   return { sessions: rows };
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/sessions/stats — aggregated segment breakdowns for dashboard
+// Must be registered before /:sessionId to avoid route conflict.
+// ---------------------------------------------------------------------------
+
+fastify.get("/api/sessions/stats", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const { project_id } = request.query;
+
+  const sessionJoin = project_id
+    ? "JOIN sessions s ON s.session_id = sf.session_id AND s.project_id = $1"
+    : "JOIN sessions s ON s.session_id = sf.session_id";
+  const params = project_id ? [project_id] : [];
+
+  const [sources, countries, devices, botRisk, lcpBuckets] = await Promise.all([
+    pool.query(
+      `SELECT COALESCE(sf.ctx_traffic_source, 'unknown') AS value,
+              COUNT(DISTINCT sf.session_id)::int AS sessions,
+              COUNT(DISTINCT c.conversion_id)::int AS conversions
+       FROM session_features sf
+       ${sessionJoin}
+       LEFT JOIN conversions c ON c.session_id = sf.session_id
+       GROUP BY 1 ORDER BY 2 DESC LIMIT 10`, params),
+
+    pool.query(
+      `SELECT COALESCE(sf.geo_country, 'unknown') AS value,
+              COUNT(DISTINCT sf.session_id)::int AS sessions,
+              COUNT(DISTINCT c.conversion_id)::int AS conversions
+       FROM session_features sf
+       ${sessionJoin}
+       LEFT JOIN conversions c ON c.session_id = sf.session_id
+       GROUP BY 1 ORDER BY 2 DESC LIMIT 10`, params),
+
+    pool.query(
+      `SELECT COALESCE(sf.ctx_device_type, 'unknown') AS value,
+              COUNT(DISTINCT sf.session_id)::int AS sessions,
+              COUNT(DISTINCT c.conversion_id)::int AS conversions
+       FROM session_features sf
+       ${sessionJoin}
+       LEFT JOIN conversions c ON c.session_id = sf.session_id
+       GROUP BY 1 ORDER BY 2 DESC`, params),
+
+    pool.query(
+      `SELECT COALESCE(sf.bot_risk_level, 'unknown') AS value,
+              COUNT(DISTINCT sf.session_id)::int AS sessions
+       FROM session_features sf
+       ${sessionJoin}
+       GROUP BY 1 ORDER BY 2 DESC`, params),
+
+    pool.query(
+      `SELECT CASE
+                WHEN sf.perf_lcp IS NULL THEN 'unknown'
+                WHEN sf.perf_lcp < 2500   THEN 'good'
+                WHEN sf.perf_lcp < 4000   THEN 'needs_improvement'
+                ELSE 'poor'
+              END AS value,
+              COUNT(DISTINCT sf.session_id)::int AS sessions
+       FROM session_features sf
+       ${sessionJoin}
+       GROUP BY 1 ORDER BY 2 DESC`, params),
+  ]);
+
+  return {
+    traffic_sources: sources.rows,
+    countries:       countries.rows,
+    device_types:    devices.rows,
+    bot_risk:        botRisk.rows,
+    lcp_buckets:     lcpBuckets.rows,
+  };
 });
 
 // ---------------------------------------------------------------------------

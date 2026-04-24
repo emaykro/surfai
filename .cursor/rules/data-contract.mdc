@@ -17,7 +17,7 @@ alwaysApply: false
   - `sessionId`: non-empty string identifying one browser session.
   - `sentAt`: integer unix timestamp in milliseconds, created on the client.
   - `events`: non-empty array of event objects.
-- Allowed event types: `mouse`, `scroll`, `idle`, `click`, `form`, `engagement`, `session`, `context`, `cross_session`, `goal`, `bot_signals`, `performance`.
+- Allowed event types: `mouse`, `scroll`, `idle`, `click`, `form`, `engagement`, `session`, `context`, `cross_session`, `goal`, `bot_signals`, `performance`, `copy`.
 - Core event shapes:
   - `mouse` -> `{x, y, ts}`
   - `scroll` -> `{percent, ts}`
@@ -35,6 +35,8 @@ alwaysApply: false
   - `bot_signals` -> `{webdriver, phantom, nightmare, selenium, cdp, pluginCount, languageCount, hasChrome, notificationPermission, hardwareConcurrency, deviceMemory, touchSupport, screenColorDepth, ts}` — one-shot headless/automation fingerprints
 - Performance event shape:
   - `performance` -> `{lcp, fcp, fid, inp, cls, ttfb, domInteractive, domContentLoaded, loadEvent, transferSize, longTaskCount, longTaskTotalMs, ts}` — Core Web Vitals + Navigation Timing + Long Tasks; emitted once per session via PerformanceCollector.beforeFlush(). All metric fields are nullable (missing on short bounces / unsupported browsers); counters (longTaskCount, longTaskTotalMs) are always present.
+- Copy intent event shape:
+  - `copy` -> `{ts}` — emitted once per clipboard copy action by CopyCollector. No clipboard content is captured (zero PII). `copy_count` in session_features is the session total. Strong intent signal: user likely copied a phone number, address, or price.
 - All numeric fields must be numbers, never strings.
 - `percent` / `maxScrollPercent` must stay in `0..100`.
 - Element selectors and text are hashed with MurmurHash3 (truncated to 120 chars) — never raw strings.

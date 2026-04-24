@@ -125,6 +125,10 @@ export interface PerformanceEventData {
   ts: number;
 }
 
+export interface CopyEventData {
+  ts: number;
+}
+
 export interface BotSignalsEventData {
   webdriver: boolean;
   phantom: boolean;
@@ -154,7 +158,8 @@ export type TrackingEvent =
   | { type: "cross_session"; data: CrossSessionEventData }
   | { type: "goal"; data: GoalEventData }
   | { type: "bot_signals"; data: BotSignalsEventData }
-  | { type: "performance"; data: PerformanceEventData };
+  | { type: "performance"; data: PerformanceEventData }
+  | { type: "copy"; data: CopyEventData };
 
 // ---------------------------------------------------------------------------
 // Collector interface — all collectors implement this

@@ -88,6 +88,8 @@ NUMERIC_FEATURES = [
     "bot_score",
     # Temporal enrichment (added 2026-04-25)
     "session_local_hour",  # 0–23, local hour in user's own timezone at session start
+    # Copy intent signal (added 2026-04-25)
+    "copy_count",          # clipboard copies per session; correlates with phone/price/address reads
 ]
 
 BOOLEAN_FEATURES = [

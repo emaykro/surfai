@@ -102,6 +102,8 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp, uaHints) 
     "bot_score", "bot_risk_level", "bot_signals", "is_bot",
     // Temporal enrichment (added 2026-04-25)
     "session_local_hour",
+    // Copy intent signal (added 2026-04-25)
+    "copy_count",
   ];
 
   for (const col of FEATURE_COLUMNS) {

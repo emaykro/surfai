@@ -383,7 +383,16 @@ const performanceDataSchema = {
   },
 };
 
-const ALL_EVENT_TYPES = ["mouse", "scroll", "idle", "click", "form", "engagement", "session", "context", "cross_session", "goal", "bot_signals", "performance"];
+const ALL_EVENT_TYPES = ["mouse", "scroll", "idle", "click", "form", "engagement", "session", "context", "cross_session", "goal", "bot_signals", "performance", "copy"];
+
+const copyDataSchema = {
+  type: "object",
+  required: ["ts"],
+  additionalProperties: false,
+  properties: {
+    ts: { type: "number" },
+  },
+};
 
 const eventItemSchema = {
   type: "object",
@@ -441,6 +450,10 @@ const eventItemSchema = {
     {
       if: { properties: { type: { const: "performance" } } },
       then: { properties: { data: performanceDataSchema } },
+    },
+    {
+      if: { properties: { type: { const: "copy" } } },
+      then: { properties: { data: copyDataSchema } },
     },
   ],
 };

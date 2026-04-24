@@ -481,6 +481,14 @@ function extractPerformance(events) {
 }
 
 // ---------------------------------------------------------------------------
+// Copy behavior
+// ---------------------------------------------------------------------------
+
+function extractCopy(events) {
+  return { copy_count: events.length };
+}
+
+// ---------------------------------------------------------------------------
 // Cross-session
 // ---------------------------------------------------------------------------
 
@@ -522,6 +530,7 @@ function extractAllFeatures(events) {
     ...extractContext(byType.context || []),
     ...extractCrossSession(byType.cross_session || []),
     ...extractPerformance(byType.performance || []),
+    ...extractCopy(byType.copy || []),
     event_count: events.length,
   };
 
@@ -539,5 +548,6 @@ module.exports = {
   extractContext,
   extractCrossSession,
   extractPerformance,
+  extractCopy,
   slidingWindow,
 };

@@ -67,6 +67,8 @@ Any schema change — adding a field, adding a new event `type`, changing an enu
 | `OPERATOR_API_TOKEN` | — (empty = all operator endpoints return 401) | Bearer token for operator/dashboard API |
 | `ALLOW_INGEST_WITHOUT_SITEKEY` | `false` | Set `true` for local dev without siteKey setup |
 | `LOG_LEVEL` | `info` | Pino log level |
+| `CONTACT_BOT_TOKEN` | (empty → contact:forward aborts) | @Surfaiask_bot token; polls for lead messages and sends auto-replies. Consumed by `server/jobs/contact-forward.js`. |
+| `API_BASE_URL` | `https://surfai.ru` | Base URL used by job scripts that construct self-referencing URLs. Not used by `server.js`. |
 
 ## UA Client Hints
 

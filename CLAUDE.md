@@ -83,6 +83,10 @@ cd server && npm run backfill
 cd server && npm run metrica:reconcile -- --date=2026-04-18 --dry-run
 cd server && npm run metrica:reconcile             # yesterday, all sites, writes DB
 
+# Forward lead messages: polls @Surfaiask_bot, auto-replies, forwards to admin via @SurfaiOps_bot
+# (one-shot; surfai-contact-forward.timer runs it every 60s on prod)
+cd server && npm run contact:forward
+
 # Run all tests (client + server)
 npm test                 # client: vitest, server: node --test
 
@@ -430,3 +434,5 @@ Starting 2026-04-10, the ingest path looks up the client IP against local MMDB f
 | `TELEGRAM_BOT_TOKEN` | (empty → alerter aborts) | Bot token from @BotFather for the Telegram alert channel. Consumed by `npm run health:alert`. |
 | `TELEGRAM_ALERT_CHAT_ID` | (empty → alerter aborts) | Destination chat id for alerts (integer, private or group). Obtained via `getUpdates` after the user sends any message to the bot. |
 | `METRICA_CONVERSION_TARGET` | `lead` | Fallback Metrica goal name used when a SURFAI conversion has no matching goal name. Must match a goal configured in the Metrica counter. Consumed by `npm run metrica:conversions`. |
+| `CONTACT_BOT_TOKEN` | (empty → contact:forward aborts) | @Surfaiask_bot token. The forwarder uses it to poll incoming lead messages and send auto-replies. Separate from `TELEGRAM_BOT_TOKEN` (@SurfaiOps_bot) per the two-channel convention. |
+| `API_BASE_URL` | `https://surfai.ru` | Base URL of the prod server. Not used by `server.js` directly; consumed by job scripts that need to construct self-referencing URLs. |

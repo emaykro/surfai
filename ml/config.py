@@ -48,6 +48,7 @@ NUMERIC_FEATURES = [
     "form_field_skip_rate",
     "form_submit_count",
     "form_abandon_count",
+    "form_last_abandon_field_index",  # ordinal: higher = got further into the form (added 2026-04-25)
     "engagement_active_ms",
     "engagement_idle_ms",
     "engagement_active_ratio",

@@ -278,6 +278,7 @@ function extractForm(events) {
 
   let submitCount = 0;
   let abandonCount = 0;
+  let lastAbandonFieldIndex = null;
   const fillDurations = [];
 
   // Track per-field interactions for hesitation & correction
@@ -301,7 +302,10 @@ function extractForm(events) {
       }
     }
     if (action === "submit") submitCount++;
-    if (action === "abandon") abandonCount++;
+    if (action === "abandon") {
+      abandonCount++;
+      if (typeof fieldIndex === "number") lastAbandonFieldIndex = fieldIndex;
+    }
   }
 
   // Hesitation: focus then fill > 3s
@@ -330,6 +334,7 @@ function extractForm(events) {
     form_field_skip_rate: totalFields > 0 ? skipCount / totalFields : null,
     form_submit_count: submitCount,
     form_abandon_count: abandonCount,
+    form_last_abandon_field_index: lastAbandonFieldIndex,
   };
 }
 

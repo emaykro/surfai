@@ -67,6 +67,7 @@ async function computeAndStore(sessionId, projectId, siteId, clientIp, uaHints) 
     "click_spatial_clusters", "click_rage_count", "click_cta_ratio", "click_external_ratio",
     "form_total_interactions", "form_avg_fill_ms", "form_hesitation_count",
     "form_correction_count", "form_field_skip_rate", "form_submit_count", "form_abandon_count",
+    "form_last_abandon_field_index",
     "engagement_active_ms", "engagement_idle_ms", "engagement_active_ratio",
     "engagement_max_scroll", "engagement_readthrough", "engagement_micro_scrolls",
     "session_duration_ms", "session_page_count", "session_avg_nav_speed",

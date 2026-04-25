@@ -37,13 +37,10 @@ function getToken() {
   return t;
 }
 
-// Metrica offline conversions expect YYYY-MM-DD HH:MM:SS.
-// The API interprets the time in the counter's timezone; for Russia-hosted
-// counters that's MSK (UTC+3). We apply the offset here so the timestamps
-// appear correct in Metrica reports.
+// Metrica Offline Conversions API expects DateTime as Unix epoch seconds (UTC).
+// The YYYY-MM-DD HH:MM:SS format is only accepted by the Metrica web UI uploader.
 function toMetricaDateTime(date) {
-  const msk = new Date(date.getTime() + 3 * 60 * 60 * 1000);
-  return msk.toISOString().replace("T", " ").slice(0, 19);
+  return Math.floor(date.getTime() / 1000);
 }
 
 async function uploadToMetrica(counterId, csvContent, dryRun) {
@@ -121,14 +118,28 @@ async function run({ dryRun = false } = {}) {
   const pushedIds = [];
 
   for (const [counterId, counterRows] of byCounter) {
-    const lines = ["ClientId,Target,DateTime,Price,Currency"];
+    // Include Price/Currency columns only if at least one row carries a value;
+    // otherwise drop them entirely (Metrica rejects rows with stray empty fields).
+    const hasValue = counterRows.some((r) => r.value != null);
+    const header = hasValue
+      ? "ClientId,Target,DateTime,Price,Currency"
+      : "ClientId,Target,DateTime";
+    const lines = [header];
     for (const row of counterRows) {
-      const dt    = toMetricaDateTime(new Date(Number(row.ts)));
-      const price = row.value != null ? Number(row.value).toFixed(2) : "";
-      const cur   = row.value != null ? "RUB" : "";
-      // Escape commas in target_name just in case
-      const target = String(row.target_name).replace(/,/g, " ");
-      lines.push(`${row.metrica_client_id},${target},${dt},${price},${cur}`);
+      const dt = toMetricaDateTime(new Date(Number(row.ts)));
+      // Always send the configured Metrica goal identifier (FALLBACK_TARGET).
+      // The SURFAI goal name is not used as the Metrica Target — Metrica requires
+      // a goal identifier that already exists in the counter, and our 5 prod
+      // counters all share the same "lead" identifier. Per-counter mapping can
+      // be added later if we need finer-grained Metrica goals.
+      const target = FALLBACK_TARGET.replace(/,/g, " ");
+      if (hasValue) {
+        const price = row.value != null ? Number(row.value).toFixed(2) : "";
+        const cur   = row.value != null ? "RUB" : "";
+        lines.push(`${row.metrica_client_id},${target},${dt},${price},${cur}`);
+      } else {
+        lines.push(`${row.metrica_client_id},${target},${dt}`);
+      }
     }
     const csv = lines.join("\n");
 

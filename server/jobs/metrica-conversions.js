@@ -123,7 +123,7 @@ async function run({ dryRun = false } = {}) {
   for (const [counterId, counterRows] of byCounter) {
     const lines = ["ClientId,Target,DateTime,Price,Currency"];
     for (const row of counterRows) {
-      const dt    = toMetricaDateTime(new Date(row.ts));
+      const dt    = toMetricaDateTime(new Date(Number(row.ts)));
       const price = row.value != null ? Number(row.value).toFixed(2) : "";
       const cur   = row.value != null ? "RUB" : "";
       // Escape commas in target_name just in case

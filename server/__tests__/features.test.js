@@ -8,6 +8,7 @@ const {
   extractScroll,
   extractClicks,
   extractForm,
+  extractContext,
   slidingWindow,
 } = require("../features/extractors");
 
@@ -186,6 +187,31 @@ describe("slidingWindow", () => {
 // ---------------------------------------------------------------------------
 // Full extraction orchestrator
 // ---------------------------------------------------------------------------
+
+describe("extractContext", () => {
+  // Regression for the late-binding _ym_uid bug: Metrica's tag.js often hasn't
+  // set the cookie when the first context emits; multi-page sessions emit
+  // additional context events that may carry it. Extractor must take the latest
+  // non-null metricaClientId, not events[0].
+  it("picks latest non-null metricaClientId across context events", () => {
+    const events = [
+      { type: "context", data: { trafficSource: "direct", deviceType: "mobile", browser: "Chrome", os: "Linux", screenW: 360, screenH: 780, language: "ru-RU", connectionType: "4g", metricaClientId: null, ts: 1000 } },
+      { type: "context", data: { trafficSource: "direct", deviceType: "mobile", browser: "Chrome", os: "Linux", screenW: 360, screenH: 780, language: "ru-RU", connectionType: "4g", metricaClientId: "1777113478831429367", ts: 2000 } },
+      { type: "context", data: { trafficSource: "direct", deviceType: "mobile", browser: "Chrome", os: "Linux", screenW: 360, screenH: 780, language: "ru-RU", connectionType: "4g", metricaClientId: null, ts: 3000 } },
+    ];
+    const result = extractContext(events);
+    assert.equal(result.metrica_client_id, "1777113478831429367");
+    assert.equal(result.ctx_browser, "Chrome");
+  });
+
+  it("returns null metrica_client_id when all context events have null", () => {
+    const events = [
+      { type: "context", data: { trafficSource: "direct", deviceType: "mobile", browser: "Chrome", os: "Linux", screenW: 360, screenH: 780, language: "ru-RU", connectionType: "4g", metricaClientId: null, ts: 1000 } },
+    ];
+    const result = extractContext(events);
+    assert.equal(result.metrica_client_id, null);
+  });
+});
 
 describe("extractAllFeatures", () => {
   it("combines all extractors", () => {

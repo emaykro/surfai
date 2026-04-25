@@ -404,6 +404,16 @@ function extractContext(events) {
   // Use the first context event (set once per session)
   const first = events[0].data;
 
+  // metricaClientId (_ym_uid cookie) is late-binding: Metrica's tag.js often
+  // hasn't set the cookie yet when the first context event emits. Subsequent
+  // emits (multi-page sessions, SPA navigation) may carry it. Take the latest
+  // non-null value from any context event in the session.
+  let latestMetricaClientId = null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const v = events[i].data.metricaClientId;
+    if (v != null) { latestMetricaClientId = v; break; }
+  }
+
   // languages may be missing on cached pre-extension bundles
   const langCount = Array.isArray(first.languages) ? first.languages.length : null;
 
@@ -432,7 +442,7 @@ function extractContext(events) {
     ctx_utm_campaign: first.utmCampaign ?? null,
     ctx_utm_term: first.utmTerm ?? null,
     ctx_utm_content: first.utmContent ?? null,
-    metrica_client_id: first.metricaClientId ?? null,
+    metrica_client_id: latestMetricaClientId,
     session_local_hour: localHour(first.ts, first.timezone),
   };
 }

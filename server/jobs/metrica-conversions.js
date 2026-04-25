@@ -78,23 +78,45 @@ async function uploadToMetrica(counterId, csvContent, dryRun) {
 }
 
 async function run({ dryRun = false } = {}) {
-  // Fetch conversions that have a Metrica client ID and belong to a mapped site
+  // Push only goals named lead* — `form_submit` and other tracking-only goals
+  // must not be mapped to the Metrica `lead` target, otherwise they poison
+  // ad-platform optimization (every duplicate form submit becomes a fake lead).
+  // If sf.metrica_client_id is null (Metrica's _ym_uid wasn't set yet at context
+  // emit time), fall back to another session_features row for the same visitor
+  // that has it. Metrica's _ym_uid lasts ~1 year so any prior session of the
+  // same visitor carries the right id.
   const { rows } = await pool.query(
     `SELECT
        c.id,
        c.ts,
        c.value,
        COALESCE(g.name, $1) AS target_name,
-       sf.metrica_client_id,
+       COALESCE(
+         sf.metrica_client_id,
+         (SELECT sf2.metrica_client_id
+            FROM session_features sf2
+           WHERE sf2.visitor_id = sf.visitor_id
+             AND sf2.metrica_client_id IS NOT NULL
+           ORDER BY sf2.computed_at DESC
+           LIMIT 1)
+       ) AS metrica_client_id,
        si.yandex_counter_id::bigint AS counter_id
      FROM conversions c
      JOIN sessions sess ON sess.session_id = c.session_id
      JOIN sites si      ON si.site_id = sess.site_id
      JOIN session_features sf ON sf.session_id = c.session_id
      LEFT JOIN goals g  ON g.goal_id = c.goal_id
-     WHERE sf.metrica_client_id IS NOT NULL
+     WHERE g.name ILIKE 'lead%'
        AND si.yandex_counter_id IS NOT NULL
        AND c.metrica_synced_at IS NULL
+       AND COALESCE(
+             sf.metrica_client_id,
+             (SELECT sf2.metrica_client_id
+                FROM session_features sf2
+               WHERE sf2.visitor_id = sf.visitor_id
+                 AND sf2.metrica_client_id IS NOT NULL
+               LIMIT 1)
+           ) IS NOT NULL
      ORDER BY si.yandex_counter_id, c.ts`,
     [FALLBACK_TARGET]
   );

@@ -466,3 +466,8 @@ Starting 2026-04-10, the ingest path looks up the client IP against local MMDB f
 | `METRICA_CONVERSION_TARGET` | `lead` | Fallback Metrica goal name used when a SURFAI conversion has no matching goal name. Must match a goal configured in the Metrica counter. Consumed by `npm run metrica:conversions`. |
 | `CONTACT_BOT_TOKEN` | (empty → contact:forward aborts) | @Surfaiask_bot token. The forwarder uses it to poll incoming lead messages and send auto-replies. Separate from `TELEGRAM_BOT_TOKEN` (@SurfaiOps_bot) per the two-channel convention. |
 | `API_BASE_URL` | `https://surfai.ru` | Base URL of the prod server. Not used by `server.js` directly; consumed by job scripts that need to construct self-referencing URLs. |
+| `BACKUP_S3_ENDPOINT` | (empty → `npm run backup:offsite` exits 1) | S3-compatible API endpoint URL, e.g. `https://storage.yandexcloud.net` (Yandex Object Storage), `https://<account>.r2.cloudflarestorage.com` (R2), `https://s3.<region>.backblazeb2.com` (B2), `https://s3.selcdn.ru` (Selectel). |
+| `BACKUP_S3_REGION` | (empty) | Region label required by SigV4. Examples: `ru-central1` (Yandex), `auto` (R2), `us-east-005` (B2), `ru-1` (Selectel). |
+| `BACKUP_S3_BUCKET` | (empty) | Bucket name. Must already exist with write permissions for the access key. |
+| `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | (empty) | Access key id / secret key with `storage.editor`-equivalent permission scoped to the bucket. |
+| `BACKUP_S3_PREFIX` | (empty → upload to bucket root) | Optional path prefix inside the bucket, e.g. `surfai/`. |

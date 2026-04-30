@@ -1437,8 +1437,6 @@
         },
       ];
 
-      const hasCountry = data.countries && data.countries.length > 0;
-
       panel.innerHTML = sections.map(({ title, rows, colorFn, hasConv }) => {
         if (!rows || !rows.length) return "";
         const maxSessions = Math.max(...rows.map((r) => r.sessions || 0), 1);
@@ -1464,9 +1462,7 @@
         }).join("");
 
         return `<div class="seg-card"><h3>${esc(title)}</h3>${rowsHtml}</div>`;
-      }).join("") + (hasCountry
-        ? `<div style="grid-column:1/-1;text-align:right;font-size:10px;color:var(--text-dim);padding:4px 0">IP Geolocation by <a href="https://db-ip.com/" target="_blank" rel="noopener" style="color:var(--text-dim);text-decoration:underline">DB-IP</a></div>`
-        : "");
+      }).join("");
     }
 
     function populateFilterOptions(data) {
@@ -1530,5 +1526,13 @@
     loadMlReadiness();
     setInterval(loadMlReadiness, 5 * 60 * 1000); // refresh every 5 min
   </script>
+  <footer style="margin-top:24px;padding:12px 16px;text-align:center;font-size:11px;color:var(--text-dim);border-top:1px solid var(--border);">
+    Geo &amp; ASN data by
+    <a href="https://db-ip.com/" target="_blank" rel="noopener" style="color:var(--text-dim);text-decoration:underline">DB-IP</a>
+    and
+    <a href="http://www.routeviews.org/" target="_blank" rel="noopener" style="color:var(--text-dim);text-decoration:underline">RouteViews</a>,
+    licensed under
+    <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:var(--text-dim);text-decoration:underline">CC BY 4.0</a>.
+  </footer>
 </body>
 </html>

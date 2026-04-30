@@ -13,13 +13,15 @@
     "metrica:refresh": "node jobs/metrica-refresh-token.js",
     "health:alert": "node jobs/health-alert.js",
     "contact:forward": "node jobs/contact-forward.js",
-    "audiences:export": "node jobs/audiences-export.js"
+    "audiences:export": "node jobs/audiences-export.js",
+    "backup:offsite": "node jobs/backup-offsite.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1039.0",
     "@fastify/cors": "^11.2.0",
     "@fastify/static": "^9.0.0",
     "@ip-location-db/asn-mmdb": "^2.3.2026040919",

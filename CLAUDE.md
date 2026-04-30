@@ -459,7 +459,8 @@ Starting 2026-04-10, the ingest path looks up the client IP against local MMDB f
 | `YANDEX_METRICA_REFRESH_TOKEN` | (empty) | Refresh token; consumed by `refreshAccessToken()` helper when the access token expires. |
 | `YANDEX_OAUTH_CLIENT_ID` / `_CLIENT_SECRET` | (empty) | OAuth app credentials, used only for refresh flow. |
 | `YANDEX_METRICA_ENABLED` | `false` | Gate for the *scheduled* reconcile worker (cron/systemd). Manual `npm run metrica:reconcile` ignores it. |
-| `YANDEX_METRICA_TOKEN_ISSUED_AT` | (empty → health endpoint warns) | Date the current access token was issued, YYYY-MM-DD. Used by `/api/health` to warn when the assumed 365-day TTL is within 30 days of expiry. |
+| `YANDEX_METRICA_TOKEN_ISSUED_AT` | (empty → health endpoint warns) | Date the current access token was issued, YYYY-MM-DD. Used by `/api/health` only as a fallback when `EXPIRES_AT` is missing. |
+| `YANDEX_METRICA_TOKEN_EXPIRES_AT` | (empty → health falls back to ISSUED_AT) | Date the current access token expires, YYYY-MM-DD. Written by `npm run metrica:refresh` from Yandex's `expires_in`. Authoritative source of truth — Yandex returns variable TTLs (observed 174 days, not always 365), so `ISSUED_AT + 365` is unreliable. |
 | `TELEGRAM_BOT_TOKEN` | (empty → alerter aborts) | Bot token from @BotFather for the Telegram alert channel. Consumed by `npm run health:alert`. |
 | `TELEGRAM_ALERT_CHAT_ID` | (empty → alerter aborts) | Destination chat id for alerts (integer, private or group). Obtained via `getUpdates` after the user sends any message to the bot. |
 | `METRICA_CONVERSION_TARGET` | `lead` | Fallback Metrica goal name used when a SURFAI conversion has no matching goal name. Must match a goal configured in the Metrica counter. Consumed by `npm run metrica:conversions`. |

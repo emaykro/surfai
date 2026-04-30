@@ -1574,22 +1574,37 @@ fastify.get("/api/health", { preHandler: [requireOperatorAuth] }, async (_reques
   }
 
   // --- Metrica OAuth token expiry (soft reminder) ------------------------
+  // Prefer the explicit EXPIRES_AT written by metrica-refresh-token.js,
+  // since Yandex returns variable expires_in (we've seen 174d as well as 365d).
+  // Fall back to ISSUED_AT + assumed 365-day TTL for envs not rotated yet.
+  const expiresAt = process.env.YANDEX_METRICA_TOKEN_EXPIRES_AT;
   const issued = process.env.YANDEX_METRICA_TOKEN_ISSUED_AT;
-  if (issued && /^\d{4}-\d{2}-\d{2}$/.test(issued)) {
+  let remaining = null;
+  let source = null;
+  if (expiresAt && /^\d{4}-\d{2}-\d{2}$/.test(expiresAt)) {
+    const expiresMs = new Date(expiresAt + "T00:00:00Z").getTime();
+    remaining = Math.floor((expiresMs - Date.now()) / (86400 * 1000));
+    source = "expires_at";
+  } else if (issued && /^\d{4}-\d{2}-\d{2}$/.test(issued)) {
     const issuedMs = new Date(issued + "T00:00:00Z").getTime();
     const ageDays = (Date.now() - issuedMs) / (86400 * 1000);
-    const remaining = Math.floor(METRICA_TOKEN_TTL_DAYS - ageDays);
+    remaining = Math.floor(METRICA_TOKEN_TTL_DAYS - ageDays);
+    source = "issued_at_plus_ttl";
+  }
+  if (remaining != null) {
     checks.metrica_token_expiry = {
       ok: remaining > METRICA_TOKEN_WARN_DAYS,
       level: remaining <= 7 ? "critical" : remaining <= METRICA_TOKEN_WARN_DAYS ? "warn" : "ok",
-      issued_at: issued,
+      issued_at: issued || null,
+      expires_at: expiresAt || null,
       days_remaining: remaining,
+      source,
     };
   } else {
     checks.metrica_token_expiry = {
       ok: false,
       level: "warn",
-      error: "YANDEX_METRICA_TOKEN_ISSUED_AT not set (expected YYYY-MM-DD)",
+      error: "Neither YANDEX_METRICA_TOKEN_EXPIRES_AT nor YANDEX_METRICA_TOKEN_ISSUED_AT set (expected YYYY-MM-DD)",
     };
   }
 

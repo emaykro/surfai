@@ -34,6 +34,7 @@ alwaysApply: false
 - `GET /api/health` — aggregate system health: DB, disk, memory, ingest liveness, reconcile-timer age, Metrica-token expiry. Returns HTTP 503 when any check is critical.
 - `GET /api/ml/readiness` — enriched conversions vs target + 14-day-trailing daily rate + ETA. Drives the ML retrain readiness widget on `/dashboard/`.
 - `GET /api/sites/health` — per-site health last 48 h; detects "passive-only event mix" fingerprint (tag removed client-side), session drops, missing interaction types. Consumed by `/dashboard/sites.html`.
+- `GET /api/antifraud/summary?days=7&site_id=X` — aggregates `is_bot` (hard fingerprint), `bot_risk_level` (soft score, medium+high), and `geo_is_datacenter` (origin) over the window. Returns totals, by-site, by-utm-source (top 20 by bot share), top bot ASNs (top 15). Pure read of `session_features`. Consumed by `/dashboard/antifraud.html`.
 - `POST /api/goals` — Create goal (name, type, rules, is_primary). Tenant via `X-Tenant-Id` header.
 - `GET /api/goals` — List goals for tenant.
 - `PUT /api/goals/:goalId` — Update goal.

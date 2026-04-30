@@ -146,6 +146,7 @@ Every `POST /api/events` body must be:
 | `GET` | `/api/sessions/:sessionId/conversions` | Conversion events for a session |
 | `GET` | `/api/reconciliation/daily?days=30&site_id=X` | Metrica vs SURFAI daily counts from `metrica_daily_reconciliation`. Populated by `npm run metrica:reconcile` on the server. |
 | `GET` | `/api/sites/health` | Per-site health last 48h; detects the "passive-only event mix" fingerprint plus session-drop / install-verified / missing-interaction-types flags. Consumed by `/dashboard/sites.html`. |
+| `GET` | `/api/antifraud/summary?days=7&site_id=X` | Aggregates `is_bot` (hard), `bot_risk_level` (soft), and `geo_is_datacenter` (origin) over the window. Returns totals, by-site, by-utm-source (top 20 sorted by bot share), and top bot ASNs (top 15). Consumed by `/dashboard/antifraud.html`. Pure read of `session_features`; no new ingest path. |
 | `GET` | `/api/ml/readiness` | Enriched conversions vs target + 14-day-trailing daily rate + ETA. Drives the header widget on `/dashboard/`. |
 | `GET` | `/api/health` | Aggregate system health: DB, disk, memory, ingest liveness, reconcile-timer age, Metrica-token expiry. Returns HTTP 503 when any check is critical. |
 | `POST` | `/api/projects` | Create project (name, vertical) |
@@ -166,6 +167,7 @@ Dashboard UI (three pages, shared nav):
 - `http://localhost:3000/dashboard/` — Sessions list, live SSE feed, session detail + replay. Header shows ML retrain readiness widget.
 - `http://localhost:3000/dashboard/reconciliation.html` — Metrica vs SURFAI daily totals, pivot grid tinted by per-site baseline drift.
 - `http://localhost:3000/dashboard/sites.html` — Per-site health last 48h; detects "passive-only event mix" (tag removed fingerprint), session drops, missing interaction types.
+- `http://localhost:3000/dashboard/antifraud.html` — Bot share by site, UTM source, and ASN over a configurable window (24h/7d/30d/90d). Uses existing `is_bot`/`bot_risk_level`/`geo_is_datacenter` columns; no new collectors or migrations.
 
 Operator Cabinet: `http://localhost:3000/cabinet/`
 

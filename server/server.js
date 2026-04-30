@@ -1434,6 +1434,149 @@ fastify.get("/api/sites/health", { preHandler: [requireOperatorAuth] }, async ()
 });
 
 // ---------------------------------------------------------------------------
+// Anti-Fraud summary — packages existing bot_signals + datacenter geo into a
+// single aggregate view for the operator dashboard. No new ingest, no new
+// columns; all data is already persisted by the regular feature-store path.
+//
+// Three categories are reported side-by-side because they answer different
+// questions and intentionally overlap:
+//   - bot_sessions      = is_bot = true (hard-rule fingerprint match)
+//   - suspicious_sessions = bot_risk_level IN ('medium','high') (soft score)
+//   - datacenter_sessions = geo_is_datacenter = true (origin signal)
+// Operators can decide which is actionable on which channel.
+// ---------------------------------------------------------------------------
+
+fastify.get("/api/antifraud/summary", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const days = Math.min(Math.max(parseInt(request.query.days, 10) || 7, 1), 90);
+  const siteId = request.query.site_id || null;
+
+  const params = [days];
+  let siteClause = "";
+  if (siteId) {
+    params.push(siteId);
+    siteClause = `AND ss.site_id = $${params.length}`;
+  }
+
+  // Common FROM/WHERE used by totals/utm/asn aggregates. session_features is
+  // the canonical row per session; sessions provides first_seen_at + site_id.
+  // by_site adds a separate JOIN to `sites` for the human-readable domain.
+  const baseFrom = `
+    FROM session_features sf
+    JOIN sessions ss ON ss.session_id = sf.session_id
+   WHERE ss.first_seen_at >= NOW() - ($1::int * INTERVAL '1 day')
+     ${siteClause}
+  `;
+
+  // Sub-aggregate UTM and ASN with min-volume floors. A UTM source with 3
+  // sessions of which 3 are bots is noise, not a finding — we'd rather miss
+  // it than make the operator chase phantom alerts.
+  const MIN_UTM_SESSIONS = 20;
+  const MIN_ASN_SESSIONS = 30;
+
+  const [totals, bySite, byUtm, topAsn] = await Promise.all([
+    pool.query(
+      `SELECT
+         COUNT(*)::int AS sessions,
+         COUNT(*) FILTER (WHERE sf.is_bot = true)::int AS bot_sessions,
+         COUNT(*) FILTER (WHERE sf.bot_risk_level IN ('medium','high'))::int AS suspicious_sessions,
+         COUNT(*) FILTER (WHERE sf.geo_is_datacenter = true)::int AS datacenter_sessions
+       ${baseFrom}`,
+      params
+    ),
+    pool.query(
+      `SELECT
+         si.site_id,
+         si.domain,
+         COUNT(*)::int AS sessions,
+         COUNT(*) FILTER (WHERE sf.is_bot = true)::int AS bot_sessions,
+         COUNT(*) FILTER (WHERE sf.bot_risk_level IN ('medium','high'))::int AS suspicious_sessions,
+         COUNT(*) FILTER (WHERE sf.geo_is_datacenter = true)::int AS datacenter_sessions
+       FROM session_features sf
+       JOIN sessions ss ON ss.session_id = sf.session_id
+       JOIN sites si    ON si.site_id    = ss.site_id
+      WHERE ss.first_seen_at >= NOW() - ($1::int * INTERVAL '1 day')
+        ${siteClause}
+       GROUP BY si.site_id, si.domain
+       ORDER BY si.domain`,
+      params
+    ),
+    pool.query(
+      `SELECT
+         COALESCE(NULLIF(sf.ctx_utm_source, ''), '(none)') AS utm_source,
+         COUNT(*)::int AS sessions,
+         COUNT(*) FILTER (WHERE sf.is_bot = true)::int AS bot_sessions,
+         COUNT(*) FILTER (WHERE sf.bot_risk_level IN ('medium','high'))::int AS suspicious_sessions,
+         COUNT(*) FILTER (WHERE sf.geo_is_datacenter = true)::int AS datacenter_sessions
+       ${baseFrom}
+       GROUP BY utm_source
+       HAVING COUNT(*) >= ${MIN_UTM_SESSIONS}
+       ORDER BY (
+         COUNT(*) FILTER (WHERE sf.is_bot = true)::float / NULLIF(COUNT(*), 0)
+       ) DESC NULLS LAST,
+         COUNT(*) DESC,
+         utm_source ASC
+       LIMIT 20`,
+      params
+    ),
+    pool.query(
+      `SELECT
+         sf.geo_asn AS asn,
+         MAX(sf.geo_asn_org) AS asn_org,
+         COUNT(*)::int AS sessions,
+         COUNT(*) FILTER (WHERE sf.is_bot = true)::int AS bot_sessions
+       ${baseFrom}
+         AND sf.geo_asn IS NOT NULL
+       GROUP BY sf.geo_asn
+       HAVING COUNT(*) >= ${MIN_ASN_SESSIONS}
+          AND COUNT(*) FILTER (WHERE sf.is_bot = true) > 0
+       ORDER BY (
+         COUNT(*) FILTER (WHERE sf.is_bot = true)::float / NULLIF(COUNT(*), 0)
+       ) DESC,
+         bot_sessions DESC,
+         sf.geo_asn ASC
+       LIMIT 15`,
+      params
+    ),
+  ]);
+
+  const t = totals.rows[0] || { sessions: 0, bot_sessions: 0, suspicious_sessions: 0, datacenter_sessions: 0 };
+  const pct = (n, total) => (total > 0 ? Number(((n / total) * 100).toFixed(2)) : 0);
+
+  const decorate = (row) => ({
+    ...row,
+    bot_pct: pct(row.bot_sessions, row.sessions),
+    suspicious_pct: row.suspicious_sessions != null ? pct(row.suspicious_sessions, row.sessions) : undefined,
+    datacenter_pct: row.datacenter_sessions != null ? pct(row.datacenter_sessions, row.sessions) : undefined,
+  });
+
+  return {
+    as_of: new Date().toISOString(),
+    window_days: days,
+    site_id: siteId,
+    min_utm_sessions: MIN_UTM_SESSIONS,
+    min_asn_sessions: MIN_ASN_SESSIONS,
+    totals: {
+      sessions: t.sessions,
+      bot_sessions: t.bot_sessions,
+      bot_pct: pct(t.bot_sessions, t.sessions),
+      suspicious_sessions: t.suspicious_sessions,
+      suspicious_pct: pct(t.suspicious_sessions, t.sessions),
+      datacenter_sessions: t.datacenter_sessions,
+      datacenter_pct: pct(t.datacenter_sessions, t.sessions),
+    },
+    by_site: bySite.rows.map(decorate),
+    by_utm_source: byUtm.rows.map(decorate),
+    top_bot_asn: topAsn.rows.map((r) => ({
+      asn: r.asn,
+      asn_org: r.asn_org,
+      sessions: r.sessions,
+      bot_sessions: r.bot_sessions,
+      bot_pct: pct(r.bot_sessions, r.sessions),
+    })),
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Metrica reconciliation read API
 // ---------------------------------------------------------------------------
 

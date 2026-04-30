@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SURFAI — Anti-Fraud</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #232734;
+      --border: #2e3345;
+      --text: #e1e4ed;
+      --text-dim: #8b90a0;
+      --accent: #6c7cff;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --red: #f87171;
+      --gray: #6b7280;
+      --radius: 8px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      height: 56px;
+      gap: 16px;
+    }
+    header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.5px; }
+    header h1 span { color: var(--accent); }
+    header .badge { font-size: 12px; color: var(--text-dim); }
+    header nav { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
+    header nav a {
+      color: var(--text-dim);
+      text-decoration: none;
+      padding: 6px 10px;
+      border-radius: 6px;
+    }
+    header nav a:hover { background: var(--surface2); color: var(--text); }
+    header nav a.active { color: var(--text); background: var(--surface2); }
+
+    main { padding: 24px; max-width: 1600px; margin: 0 auto; }
+    h2 { font-size: 18px; margin-bottom: 6px; font-weight: 500; }
+    .subtitle { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+    .subtitle code {
+      background: var(--surface2);
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-family: inherit;
+      font-size: 12px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .toolbar label { font-size: 12px; color: var(--text-dim); }
+    .toolbar select, .toolbar button {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .toolbar select:hover, .toolbar button:hover { background: var(--surface2); }
+    .toolbar .as-of { margin-left: auto; color: var(--text-dim); font-size: 12px; }
+
+    /* KPI strip */
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .kpi {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .kpi.k-bot         { border-left-color: var(--red); }
+    .kpi.k-suspicious  { border-left-color: var(--amber); }
+    .kpi.k-datacenter  { border-left-color: var(--accent); }
+    .kpi.k-total       { border-left-color: var(--gray); }
+    .kpi .label {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .kpi .value {
+      font-size: 26px;
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
+    .kpi .sub {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
+    }
+    .kpi .sub strong { color: var(--text); font-weight: 500; }
+
+    /* Sections */
+    section { margin-bottom: 28px; }
+    section h3 {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    section p.note {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      font-variant-numeric: tabular-nums;
+    }
+    tr:last-child td { border-bottom: none; }
+    th {
+      background: var(--surface2);
+      color: var(--text-dim);
+      font-weight: 500;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    td.num, th.num { text-align: right; }
+    .pct-bot { color: var(--red); font-weight: 500; }
+    .pct-suspicious { color: var(--amber); }
+    .pct-datacenter { color: var(--accent); }
+    .pct-clean { color: var(--text-dim); }
+
+    .empty-row td { color: var(--text-dim); text-align: center; padding: 20px; }
+
+    .empty { padding: 60px 20px; text-align: center; color: var(--text-dim); }
+    .error {
+      padding: 20px;
+      color: var(--red);
+      background: rgba(248,113,113,0.08);
+      border-radius: var(--radius);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>SURF</span>AI</h1>
+    <div class="badge">Anti-Fraud</div>
+    <nav>
+      <a href="/dashboard/">Sessions</a>
+      <a href="/dashboard/reconciliation.html">Reconciliation</a>
+      <a href="/dashboard/sites.html">Site Health</a>
+      <a href="/dashboard/antifraud.html" class="active">Anti-Fraud</a>
+    </nav>
+  </header>
+
+  <main>
+    <h2>Anti-Fraud Summary</h2>
+    <p class="subtitle">
+      Three independent signals, side by side: <code>is_bot</code> (hard fingerprint match),
+      <code>bot_risk_level</code> (soft score, medium+high), and <code>geo_is_datacenter</code> (origin).
+      Categories overlap on purpose — the same session can be all three. Use the per-UTM and per-ASN
+      breakdowns to find the worst-quality traffic sources.
+    </p>
+
+    <div class="toolbar">
+      <label for="window">Window:</label>
+      <select id="window">
+        <option value="1">Last 24h</option>
+        <option value="7" selected>Last 7 days</option>
+        <option value="30">Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <button id="refresh-btn">Refresh</button>
+      <span class="as-of" id="as-of"></span>
+    </div>
+
+    <div id="content">
+      <div class="empty">Loading…</div>
+    </div>
+  </main>
+
+  <script>
+    const API = window.location.origin;
+
+    function getOperatorToken() {
+      return localStorage.getItem("surfai_operator_token") || "";
+    }
+    function authFetch(url) {
+      const token = getOperatorToken();
+      return fetch(url, {
+        headers: token ? { Authorization: "Bearer " + token } : {},
+      });
+    }
+    function esc(s) {
+      const d = document.createElement("div");
+      d.textContent = String(s == null ? "" : s);
+      return d.innerHTML;
+    }
+    function fmt(n) {
+      if (n == null) return "–";
+      return Number(n).toLocaleString();
+    }
+    function pct(p) {
+      if (p == null) return "–";
+      return Number(p).toFixed(1) + "%";
+    }
+    function pctClass(p, kind) {
+      if (p == null || p === 0) return "pct-clean";
+      return "pct-" + kind;
+    }
+
+    function kpisHtml(t) {
+      return (
+        '<div class="kpis">' +
+          '<div class="kpi k-total">' +
+            '<div class="label">Total sessions</div>' +
+            '<div class="value">' + fmt(t.sessions) + '</div>' +
+            '<div class="sub">in window</div>' +
+          '</div>' +
+          '<div class="kpi k-bot">' +
+            '<div class="label">Bots (hard)</div>' +
+            '<div class="value">' + fmt(t.bot_sessions) + '</div>' +
+            '<div class="sub"><strong>' + pct(t.bot_pct) + '</strong> of sessions</div>' +
+          '</div>' +
+          '<div class="kpi k-suspicious">' +
+            '<div class="label">Suspicious (med+high)</div>' +
+            '<div class="value">' + fmt(t.suspicious_sessions) + '</div>' +
+            '<div class="sub"><strong>' + pct(t.suspicious_pct) + '</strong> of sessions</div>' +
+          '</div>' +
+          '<div class="kpi k-datacenter">' +
+            '<div class="label">From datacenter</div>' +
+            '<div class="value">' + fmt(t.datacenter_sessions) + '</div>' +
+            '<div class="sub"><strong>' + pct(t.datacenter_pct) + '</strong> of sessions</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    function siteRowHtml(r) {
+      return (
+        '<tr>' +
+          '<td>' + esc(r.domain) + '</td>' +
+          '<td class="num">' + fmt(r.sessions) + '</td>' +
+          '<td class="num">' + fmt(r.bot_sessions) + '</td>' +
+          '<td class="num ' + pctClass(r.bot_pct, "bot") + '">' + pct(r.bot_pct) + '</td>' +
+          '<td class="num ' + pctClass(r.suspicious_pct, "suspicious") + '">' + pct(r.suspicious_pct) + '</td>' +
+          '<td class="num ' + pctClass(r.datacenter_pct, "datacenter") + '">' + pct(r.datacenter_pct) + '</td>' +
+        '</tr>'
+      );
+    }
+
+    function utmRowHtml(r) {
+      return (
+        '<tr>' +
+          '<td>' + esc(r.utm_source) + '</td>' +
+          '<td class="num">' + fmt(r.sessions) + '</td>' +
+          '<td class="num ' + pctClass(r.bot_pct, "bot") + '">' + pct(r.bot_pct) + '</td>' +
+          '<td class="num ' + pctClass(r.suspicious_pct, "suspicious") + '">' + pct(r.suspicious_pct) + '</td>' +
+          '<td class="num ' + pctClass(r.datacenter_pct, "datacenter") + '">' + pct(r.datacenter_pct) + '</td>' +
+        '</tr>'
+      );
+    }
+
+    function asnRowHtml(r) {
+      return (
+        '<tr>' +
+          '<td>AS' + esc(r.asn) + '</td>' +
+          '<td>' + esc(r.asn_org || "(unknown)") + '</td>' +
+          '<td class="num">' + fmt(r.sessions) + '</td>' +
+          '<td class="num">' + fmt(r.bot_sessions) + '</td>' +
+          '<td class="num ' + pctClass(r.bot_pct, "bot") + '">' + pct(r.bot_pct) + '</td>' +
+        '</tr>'
+      );
+    }
+
+    function emptyRow(cols, msg) {
+      return '<tr class="empty-row"><td colspan="' + cols + '">' + esc(msg) + '</td></tr>';
+    }
+
+    function render(data) {
+      const sitesRows = (data.by_site || []).length
+        ? data.by_site.map(siteRowHtml).join("")
+        : emptyRow(6, "No sessions in window.");
+      const utmRows = (data.by_utm_source || []).length
+        ? data.by_utm_source.map(utmRowHtml).join("")
+        : emptyRow(5, "No UTM source has at least " + data.min_utm_sessions + " sessions.");
+      const asnRows = (data.top_bot_asn || []).length
+        ? data.top_bot_asn.map(asnRowHtml).join("")
+        : emptyRow(5, "No ASN has at least " + data.min_asn_sessions + " sessions with bot activity.");
+
+      return (
+        kpisHtml(data.totals) +
+
+        '<section>' +
+          '<h3>By site</h3>' +
+          '<table><thead><tr>' +
+            '<th>Domain</th>' +
+            '<th class="num">Sessions</th>' +
+            '<th class="num">Bots</th>' +
+            '<th class="num">Bot %</th>' +
+            '<th class="num">Suspicious %</th>' +
+            '<th class="num">Datacenter %</th>' +
+          '</tr></thead><tbody>' + sitesRows + '</tbody></table>' +
+        '</section>' +
+
+        '<section>' +
+          '<h3>By UTM source — sorted by bot share, worst first</h3>' +
+          '<p class="note">Only sources with at least ' + data.min_utm_sessions + ' sessions in the window are shown. ' +
+          '<code>(none)</code> means no <code>utm_source</code> set on the landing URL.</p>' +
+          '<table><thead><tr>' +
+            '<th>UTM source</th>' +
+            '<th class="num">Sessions</th>' +
+            '<th class="num">Bot %</th>' +
+            '<th class="num">Suspicious %</th>' +
+            '<th class="num">Datacenter %</th>' +
+          '</tr></thead><tbody>' + utmRows + '</tbody></table>' +
+        '</section>' +
+
+        '<section>' +
+          '<h3>Top problematic ASNs — networks with the highest bot share</h3>' +
+          '<p class="note">Only ASNs with at least ' + data.min_asn_sessions + ' sessions and at least one detected bot are shown. ' +
+          'High bot share on a single ASN is a candidate to add to the platform exclusion list (e.g. Yandex Direct площадки).</p>' +
+          '<table><thead><tr>' +
+            '<th>ASN</th>' +
+            '<th>Organization</th>' +
+            '<th class="num">Sessions</th>' +
+            '<th class="num">Bots</th>' +
+            '<th class="num">Bot %</th>' +
+          '</tr></thead><tbody>' + asnRows + '</tbody></table>' +
+        '</section>'
+      );
+    }
+
+    async function load() {
+      const content = document.getElementById("content");
+      content.innerHTML = '<div class="empty">Loading…</div>';
+      const days = document.getElementById("window").value;
+      try {
+        const res = await authFetch(API + "/api/antifraud/summary?days=" + encodeURIComponent(days));
+        if (res.status === 401) {
+          content.innerHTML = '<div class="error">401 Unauthorized — operator token missing or invalid. Log in on the main dashboard first.</div>';
+          return;
+        }
+        if (!res.ok) {
+          content.innerHTML = '<div class="error">Failed to load: ' + res.status + '</div>';
+          return;
+        }
+        const data = await res.json();
+        content.innerHTML = render(data);
+        document.getElementById("as-of").textContent = data.as_of ? "As of " + new Date(data.as_of).toLocaleString() : "";
+      } catch (err) {
+        console.error(err);
+        content.innerHTML = '<div class="error">Error: ' + esc(err.message) + '</div>';
+      }
+    }
+
+    document.getElementById("refresh-btn").addEventListener("click", load);
+    document.getElementById("window").addEventListener("change", load);
+    load();
+    setInterval(load, 60 * 1000);
+  </script>
+
+  <footer style="margin-top:24px;padding:12px 16px;text-align:center;font-size:11px;color:var(--text-dim);border-top:1px solid var(--border);">
+    Geo &amp; ASN data by
+    <a href="https://db-ip.com/" target="_blank" rel="noopener" style="color:var(--text-dim);text-decoration:underline">DB-IP</a>
+    and
+    <a href="http://www.routeviews.org/" target="_blank" rel="noopener" style="color:var(--text-dim);text-decoration:underline">RouteViews</a>,
+    licensed under
+    <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style="color:var(--text-dim);text-decoration:underline">CC BY 4.0</a>.
+  </footer>
+</body>
+</html>

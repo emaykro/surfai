@@ -93,7 +93,7 @@ def _fetch_ids(conn, rescore_all):
 
 def _fetch_features_for_ids(conn, session_ids):
     raw_cols = (
-        ["session_id", "site_id"]
+        ["session_id"]
         + NUMERIC_FEATURES
         + BOOLEAN_FEATURES
         + [c for c in CATEGORICAL_FEATURES if c not in _DERIVED_FEATURES]
@@ -182,7 +182,7 @@ def run_scoring(model_path=None, batch_size=DEFAULT_BATCH_SIZE, rescore_all=Fals
             batch_ids = all_ids[i: i + batch_size]
             df = _fetch_features_for_ids(conn, batch_ids)
             session_ids = df["session_id"].tolist()
-            df = df.drop(columns=["session_id", "site_id"], errors="ignore")
+            df = df.drop(columns=["session_id"], errors="ignore")
             X, _ = _preprocess(df)
 
             raw_scores = model.predict_proba(X)[:, 1]

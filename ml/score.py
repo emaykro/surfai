@@ -178,12 +178,32 @@ def run_scoring(model_path=None, batch_size=DEFAULT_BATCH_SIZE, rescore_all=Fals
         all_ids = _fetch_ids(conn, rescore_all)
         log.info(f"Sessions to score: {len(all_ids)}")
 
+        expected_features = list(model.feature_names_) if hasattr(model, "feature_names_") else None
+
         for i in range(0, len(all_ids), batch_size):
             batch_ids = all_ids[i: i + batch_size]
             df = _fetch_features_for_ids(conn, batch_ids)
             session_ids = df["session_id"].tolist()
             df = df.drop(columns=["session_id"], errors="ignore")
-            X, _ = _preprocess(df)
+            X, available = _preprocess(df)
+
+            # Fail fast on feature drift instead of letting CatBoost emit
+            # cryptic "cat_features[N] = M" errors. Catches the case where
+            # FEATURE_COLUMNS changed but the model wasn't retrained, OR a
+            # column expected by the model is missing from the scoring df.
+            if expected_features is not None and i == 0:
+                missing = [f for f in expected_features if f not in X.columns]
+                extra = [f for f in X.columns if f not in expected_features]
+                if missing or extra:
+                    raise RuntimeError(
+                        "Feature drift between trained model and scoring df. "
+                        f"Model expects {len(expected_features)} features, df has {len(X.columns)}. "
+                        f"Missing in df: {missing[:8]}{'…' if len(missing) > 8 else ''}. "
+                        f"Extra in df: {extra[:8]}{'…' if len(extra) > 8 else ''}. "
+                        "Retrain the model (python3 -m ml train) or fix the feature pipeline."
+                    )
+                # Reorder columns to match the model's training order — defensive.
+                X = X[expected_features]
 
             raw_scores = model.predict_proba(X)[:, 1]
 

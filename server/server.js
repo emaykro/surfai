@@ -1593,6 +1593,27 @@ fastify.get("/api/health", { preHandler: [requireOperatorAuth] }, async (_reques
     };
   }
 
+  // --- ML scorer freshness: max(model_scored_at) age --------------------
+  // Timer fires every 5 min. >15 min stale = warn, >30 min = critical.
+  // Catches the failure mode where the systemd unit fails on every fire
+  // (e.g. feature-list / model drift) and the alerter would otherwise
+  // never notice because main service stays "active".
+  try {
+    const { rows } = await pool.query(
+      "SELECT MAX(model_scored_at) AS last FROM session_features WHERE model_scored_at IS NOT NULL"
+    );
+    const last = rows[0].last;
+    const ageSec = last ? Math.floor((Date.now() - new Date(last).getTime()) / 1000) : null;
+    checks.ml_scoring_recent = {
+      ok: ageSec != null && ageSec < 1800,
+      level: ageSec == null ? "critical" : ageSec >= 1800 ? "critical" : ageSec >= 900 ? "warn" : "ok",
+      last_scored_at: last,
+      age_seconds: ageSec,
+    };
+  } catch (err) {
+    checks.ml_scoring_recent = { ok: false, level: "warn", error: err.message.slice(0, 200) };
+  }
+
   // --- Aggregate status ---------------------------------------------------
   const levels = Object.values(checks).map((c) => c.level || (c.ok ? "ok" : "critical"));
   let status = "healthy";

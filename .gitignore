@@ -45,3 +45,12 @@ catboost_info/
 
 # Cursor plan files (local IDE state)
 .cursor/plans/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Production artifacts (never committed; live only on prod server)
+backups/
+.npm/
+.gitconfig

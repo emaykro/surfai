@@ -60,6 +60,38 @@ def load_calibrator(calibrator_path=None):
     return calibrator
 
 
+def load_site_models():
+    """Discover per-site fine-tuned models in ARTIFACTS_DIR (Phase 7).
+
+    Returns {site_id: (model, calibrator_or_None)}. Empty dict if Phase 7 hasn't
+    deployed any site model yet — the scorer then routes everything to global.
+
+    File convention written by ml/training/site_models.py:
+      artifacts/site_<site_id>_model.cbm
+      artifacts/site_<site_id>_calibrator.pkl
+    """
+    import joblib
+    from catboost import CatBoostClassifier
+
+    site_models = {}
+    for model_path in sorted(ARTIFACTS_DIR.glob("site_*_model.cbm")):
+        # site_<id>_model.cbm  →  <id>
+        site_id = model_path.stem[len("site_"): -len("_model")]
+        m = CatBoostClassifier()
+        m.load_model(str(model_path))
+
+        cal_path = ARTIFACTS_DIR / f"site_{site_id}_calibrator.pkl"
+        c = joblib.load(str(cal_path)) if cal_path.exists() else None
+
+        site_models[site_id] = (m, c)
+    if site_models:
+        log.info("Loaded %d site-specific model(s): %s",
+                 len(site_models), ", ".join(site_models.keys()))
+    else:
+        log.info("No site-specific models found — using global for all sites")
+    return site_models
+
+
 def _fetch_site_conversion_counts(conn):
     """Return {site_id: conversion_count} for all sites."""
     cur = conn.cursor()
@@ -145,12 +177,21 @@ def _write_scores(conn, session_ids, scores):
     cur.close()
 
 
+def _score_with(model, calibrator, X):
+    """Run model.predict_proba + optional calibrator. Returns calibrated probs."""
+    raw = model.predict_proba(X)[:, 1]
+    return calibrator.predict(raw) if calibrator is not None else raw
+
+
 def run_scoring(model_path=None, batch_size=DEFAULT_BATCH_SIZE, rescore_all=False):
     model = load_model(model_path)
     calibrator = load_calibrator()
+    site_models = load_site_models()
 
     conn = psycopg2.connect(DATABASE_URL)
     total_scored = 0
+    routed_global = 0
+    routed_site = 0
 
     try:
         site_conv_counts = _fetch_site_conversion_counts(conn)
@@ -191,6 +232,8 @@ def run_scoring(model_path=None, batch_size=DEFAULT_BATCH_SIZE, rescore_all=Fals
             # cryptic "cat_features[N] = M" errors. Catches the case where
             # FEATURE_COLUMNS changed but the model wasn't retrained, OR a
             # column expected by the model is missing from the scoring df.
+            # Per-site models are fine-tuned from global so their feature
+            # schema is identical — checking against global is sufficient.
             if expected_features is not None and i == 0:
                 missing = [f for f in expected_features if f not in X.columns]
                 extra = [f for f in X.columns if f not in expected_features]
@@ -204,15 +247,29 @@ def run_scoring(model_path=None, batch_size=DEFAULT_BATCH_SIZE, rescore_all=Fals
                     )
                 # Reorder columns to match the model's training order — defensive.
                 X = X[expected_features]
+            elif expected_features is not None:
+                X = X[expected_features]
 
-            raw_scores = model.predict_proba(X)[:, 1]
-
-            # Apply calibrator so stored scores are calibrated probabilities,
-            # not raw model outputs. Critical for synthetic conversion accuracy.
-            if calibrator is not None:
-                scores = calibrator.predict(raw_scores)
+            # Route by site_id: site-specific model when one exists for the
+            # session's site, otherwise global. site_id stays in X because it
+            # is also a categorical feature for the model itself. df from
+            # read_sql_query has a default RangeIndex, so label == position.
+            X = X.reset_index(drop=True)
+            scores = np.empty(len(X), dtype=float)
+            if site_models and "site_id" in X.columns:
+                for site_id_val, positions in X.groupby(X["site_id"].astype(str)).groups.items():
+                    pos = list(positions)
+                    pair = site_models.get(str(site_id_val))
+                    if pair is not None:
+                        m, c = pair
+                        routed_site += len(pos)
+                    else:
+                        m, c = model, calibrator
+                        routed_global += len(pos)
+                    scores[pos] = _score_with(m, c, X.iloc[pos])
             else:
-                scores = raw_scores
+                scores = _score_with(model, calibrator, X)
+                routed_global += len(X)
 
             _write_scores(conn, session_ids, scores)
             total_scored += len(session_ids)
@@ -221,5 +278,8 @@ def run_scoring(model_path=None, batch_size=DEFAULT_BATCH_SIZE, rescore_all=Fals
     finally:
         conn.close()
 
-    log.info(f"Scoring complete. Total sessions scored: {total_scored}")
+    log.info(
+        "Scoring complete. Total sessions scored: %d (site-routed=%d, global-routed=%d)",
+        total_scored, routed_site, routed_global,
+    )
     return total_scored

@@ -21,6 +21,7 @@ def cmd_train(args):
         print_report,
         save_artifacts,
     )
+    from ml.training.site_models import print_site_summary, train_site_models
     from ml.training.trainer import train_model
 
     # Load data
@@ -82,6 +83,12 @@ def cmd_train(args):
 
     print_report(metrics, importance, cal_metrics)
     save_artifacts(model, metrics, importance, calibrator=calibrator, cal_metrics=cal_metrics, output_dir=args.output_dir)
+
+    # Phase 7 — fine-tune per-site models on top of the freshly saved global one.
+    # Each site is evaluated against global on its own val slice; only winners
+    # are written. See vault/decisions/2026-05-10 phase 7 hierarchical ml.md.
+    site_results = train_site_models(model, df, target_column=args.target)
+    print_site_summary(site_results)
 
 
 def cmd_evaluate(args):

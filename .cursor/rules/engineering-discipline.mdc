@@ -24,7 +24,7 @@ For decisions that affect architecture or schema, create `vault/decisions/YYYY-M
 - One-shot critical events (`context`, `bot_signals`, `performance`) → use `beforeFlush()`, never `requestIdleCallback`.
 
 **Before touching the ML pipeline:**
-- State the current AUC baseline (v3 reference: 0.9785). Regressions must be justified.
+- State the current AUC baseline (v4 global: 0.9847 on full val; per-site graduated models 0.9957–1.0000 on per-site slices). Regressions must be justified.
 - Feature add/remove/rename → `extractors.js` + `ml/config.py:FEATURE_COLUMNS` in the same commit.
 
 ## Simplicity First

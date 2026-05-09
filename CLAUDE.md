@@ -183,8 +183,8 @@ Operator Cabinet: `http://localhost:3000/cabinet/`
 
 ## Current Strategy
 
-**Active Phase:** Phase 6.5 — Data Enrichment Sprint (informal interim phase between Phase 6 and Phase 7).
-Phases 1–6 complete. Bot detection layer deployed 2026-04-08. Telemetry reliability incident resolved 2026-04-10. Significant data enrichment happened 2026-04-10: extended context, GeoIP, Web Vitals, UA Client Hints. Feature count grew from ~57 to ~103.
+**Active Phase:** Phase 7 — Hierarchical ML (per-site fine-tuned CatBoost) — entered 2026-05-10.
+Phases 1–6 complete. Bot detection layer deployed 2026-04-08. Telemetry reliability incident resolved 2026-04-10. Data enrichment happened 2026-04-10: extended context, GeoIP, Web Vitals, UA Client Hints. ML v4 (130 features, AUC 0.9973) deployed 2026-04-30. Phase 7 activated 2026-05-10 — 4 of 7 sites (≥30 conv) now scored by site-specific models fine-tuned from global; cold-start sites continue on global. See `vault/decisions/2026-05-10 phase 7 hierarchical ml.md`.
 
 **Operating model:** Operator-managed platform. Internal team connects tracker to client sites via GTM, manages projects through operator cabinet. No client-facing self-serve yet.
 
@@ -241,9 +241,11 @@ The platform is designed to serve businesses across different verticals (service
 
 **Cold-start threshold** — `MIN_SITE_CONVERSIONS = 30` (in `config.py`). Below this, score.py uses the global model (trained on all sites). Above this, the site has enough data for a site-specific fine-tuning pass. Logged at score time so operators can track graduation.
 
-**Two-tier scoring (current → future)**:
-- Tier 1 (now): one global CatBoost model, `site_id` + `vertical` as categorical features, trained on all sites. CatBoost handles NaN natively (sparse enrichment columns fine).
-- Tier 2 (future): per-site fine-tuned model loaded by site-specific path; score.py checks conversion count and picks the right model.
+**Two-tier scoring (both active since 2026-05-10)**:
+- Tier 1: global CatBoost model (`latest_model.cbm`), `site_id` + `vertical` as categorical features, trained on all sites. Used for cold-start sites (< `MIN_SITE_CONVERSIONS` real conversions) and as fallback when a site model regresses on validation. CatBoost handles NaN natively.
+- Tier 2: per-site fine-tuned model (`site_<id>_model.cbm`) initialized from global via `init_model=...` and continued on the site's own data with reduced iterations/learning-rate. Lives in `ml/training/site_models.py`. Saved only when `site_auc >= global_auc - 0.005` on the site's own validation slice — never deploy a regression. `score.py` groups sessions by `site_id` and routes each group to the appropriate model; missing or skipped site files mean global is used for that site.
+
+Both tiers are produced by a single `python3 -m ml train` invocation: global trains first, then `train_site_models()` fine-tunes one model per graduated site. Re-running training fully refreshes both tiers — site models are NOT independently retrained, they're always derived from the latest global.
 
 ### Calibration
 

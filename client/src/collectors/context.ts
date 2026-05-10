@@ -25,21 +25,46 @@ import {
 /**
  * Context data collector.
  *
- * Collects once on start: traffic source, device type, browser, OS,
- * screen resolution, connection speed, browser language.
- * No PII is captured — all values are structural/categorical.
+ * Emits context at start, after 3s, and on beforeFlush. All but the first
+ * emit exist solely to catch _ym_uid late-binding: Metrica's tag.js sets the
+ * cookie ~100-500 ms after our SDK's synchronous start emit, so first-visit
+ * conversions in the same session lose their metricaClientId. The server-side
+ * extractor (server/features/extractors.js) takes the latest non-null
+ * metricaClientId across all context events; other fields use the first emit.
  */
 export class ContextCollector implements Collector {
   private tracker: SurfaiTracker;
+  private lateEmitTimer: ReturnType<typeof setTimeout> | null = null;
+  private finalEmitted = false;
+
+  private static readonly LATE_EMIT_MS = 3000;
 
   constructor(tracker: SurfaiTracker) {
     this.tracker = tracker;
   }
 
   start(): void {
-    // Emit context synchronously. Reads are cheap (navigator/screen/document.referrer)
-    // and deferring via requestIdleCallback caused bounce sessions to unload before
-    // the callback fired, dropping context for ~95% of traffic.
+    this.finalEmitted = false;
+    this.emitContext();
+    this.lateEmitTimer = setTimeout(() => {
+      this.emitContext();
+    }, ContextCollector.LATE_EMIT_MS);
+  }
+
+  stop(): void {
+    if (this.lateEmitTimer !== null) {
+      clearTimeout(this.lateEmitTimer);
+      this.lateEmitTimer = null;
+    }
+  }
+
+  beforeFlush(): void {
+    if (this.finalEmitted) return;
+    this.finalEmitted = true;
+    this.emitContext();
+  }
+
+  private emitContext(): void {
     try {
       const utm = getUtmParams();
       this.tracker.pushEvent({
@@ -53,7 +78,6 @@ export class ContextCollector implements Collector {
           screenH: window.screen.height,
           language: navigator.language || "unknown",
           connectionType: getConnectionType(),
-          // Extended fields (added 2026-04-10)
           timezone: getTimezone(),
           timezoneOffset: getTimezoneOffset(),
           languages: getLanguages(),
@@ -77,9 +101,5 @@ export class ContextCollector implements Collector {
     } catch {
       /* must never throw into host page */
     }
-  }
-
-  stop(): void {
-    // Nothing to clean up — context is emitted once
   }
 }

@@ -154,7 +154,55 @@ async function refreshAccessToken() {
 }
 
 /**
- * Scaffold for Slice 3. Not implemented.
+ * Fetch every visit that reached a specific goal in the date range.
+ * Used by the conversion-import worker to pull Metrica-side goals (e.g.
+ * calltracking, offline conversions configured in Metrica) into SURFAI.
+ *
+ * Returns rows of { visitID, clientID, dateTime } — clientID is the
+ * `_ym_uid` value we match against session_features.metrica_client_id.
+ *
+ * Sampling note: Reports API applies sampling at scale. Counters under
+ * ~10k visits/day are returned unsampled at the default accuracy. We
+ * cap `limit` at 10000 — if a single counter ever exceeds that in the
+ * configured window, switch to paginated calls (offset) or Logs API.
+ */
+async function fetchVisitsByGoal(counterId, goalId, date1ISO, date2ISO) {
+  if (!Number.isInteger(counterId) || counterId <= 0) {
+    throw new Error(`Invalid counterId: ${counterId}`);
+  }
+  if (!Number.isInteger(goalId) || goalId <= 0) {
+    throw new Error(`Invalid goalId: ${goalId}`);
+  }
+  for (const d of [date1ISO, date2ISO]) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      throw new Error(`Invalid date (expected YYYY-MM-DD): ${d}`);
+    }
+  }
+
+  const url = new URL(`${MGMT_HOST}/stat/v1/data`);
+  url.searchParams.set("ids", String(counterId));
+  url.searchParams.set("date1", date1ISO);
+  url.searchParams.set("date2", date2ISO);
+  url.searchParams.set("dimensions", "ym:s:visitID,ym:s:clientID,ym:s:dateTime");
+  url.searchParams.set("metrics", "ym:s:visits");
+  url.searchParams.set("filters", `ym:s:goal==${goalId}`);
+  url.searchParams.set("limit", "10000");
+
+  const json = await metricaFetch(url.toString());
+
+  const data = Array.isArray(json?.data) ? json.data : [];
+  return data.map((row) => {
+    const dims = row?.dimensions || [];
+    return {
+      visitID: dims[0]?.name ?? null,
+      clientID: dims[1]?.name ?? null,
+      dateTime: dims[2]?.name ?? null,
+    };
+  }).filter(r => r.visitID && r.clientID && r.dateTime);
+}
+
+/**
+ * Scaffold for Slice 3 (raw Logs API). Not implemented.
  */
 async function fetchVisitLogs() {
   throw new Error("fetchVisitLogs is not implemented (Slice 3 deliverable)");
@@ -162,6 +210,7 @@ async function fetchVisitLogs() {
 
 module.exports = {
   fetchDailyStats,
+  fetchVisitsByGoal,
   refreshAccessToken,
   fetchVisitLogs,
   // Exposed for tests only

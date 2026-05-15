@@ -109,6 +109,10 @@ async function run({ dryRun = false } = {}) {
      WHERE (g.name ILIKE 'lead%' OR g.name = ANY(si.metrica_extra_lead_goals))
        AND si.yandex_counter_id IS NOT NULL
        AND c.metrica_synced_at IS NULL
+       -- Do not push conversions that originated FROM Metrica (the
+       -- import worker fills metadata.imported_from_metrica). Re-pushing
+       -- them as an offline conversion would double-count in Metrica.
+       AND (c.metadata->>'imported_from_metrica' IS NULL OR c.metadata->>'imported_from_metrica' = 'false')
        AND COALESCE(
              sf.metrica_client_id,
              (SELECT sf2.metrica_client_id

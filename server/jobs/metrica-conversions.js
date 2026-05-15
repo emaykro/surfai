@@ -90,7 +90,7 @@ async function run({ dryRun = false } = {}) {
        c.id,
        c.ts,
        c.value,
-       COALESCE(g.name, $1) AS target_name,
+       COALESCE(g.metrica_target_name, $1) AS target_name,
        COALESCE(
          sf.metrica_client_id,
          (SELECT sf2.metrica_client_id
@@ -149,12 +149,10 @@ async function run({ dryRun = false } = {}) {
     const lines = [header];
     for (const row of counterRows) {
       const dt = toMetricaDateTime(new Date(Number(row.ts)));
-      // Always send the configured Metrica goal identifier (FALLBACK_TARGET).
-      // The SURFAI goal name is not used as the Metrica Target — Metrica requires
-      // a goal identifier that already exists in the counter, and our 5 prod
-      // counters all share the same "lead" identifier. Per-counter mapping can
-      // be added later if we need finer-grained Metrica goals.
-      const target = FALLBACK_TARGET.replace(/,/g, " ");
+      // Use per-goal Metrica target if configured (goals.metrica_target_name);
+      // otherwise fall back to METRICA_CONVERSION_TARGET env. Predicted leads
+      // get a distinct Target so they do not pollute the real-lead signal.
+      const target = String(row.target_name || FALLBACK_TARGET).replace(/,/g, " ");
       if (hasValue) {
         const price = row.value != null ? Number(row.value).toFixed(2) : "";
         const cur   = row.value != null ? "RUB" : "";

@@ -106,7 +106,7 @@ async function run({ dryRun = false } = {}) {
      JOIN sites si      ON si.site_id = sess.site_id
      JOIN session_features sf ON sf.session_id = c.session_id
      LEFT JOIN goals g  ON g.goal_id = c.goal_id
-     WHERE g.name ILIKE 'lead%'
+     WHERE (g.name ILIKE 'lead%' OR g.name = ANY(si.metrica_extra_lead_goals))
        AND si.yandex_counter_id IS NOT NULL
        AND c.metrica_synced_at IS NULL
        AND COALESCE(

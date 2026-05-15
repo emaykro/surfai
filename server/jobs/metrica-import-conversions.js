@@ -96,9 +96,9 @@ async function loadGoalIdByName(name, projectId) {
   return rows[0]?.goal_id ?? null;
 }
 
-async function insertConversion({ sessionId, visitorId, goalId, projectId, tsMs, visitId, counterId, metricaGoalId, dryRun }) {
+async function insertConversion({ sessionId, visitorId, goalId, projectId, tsMs, visitKey, counterId, metricaGoalId, dryRun }) {
   if (dryRun) {
-    console.log(`  [dry-run] would INSERT conversion session=${sessionId} goal=${goalId} visit=${visitId}`);
+    console.log(`  [dry-run] would INSERT conversion session=${sessionId} goal=${goalId} key=${visitKey}`);
     return { inserted: false, dryRun: true };
   }
   try {
@@ -113,7 +113,7 @@ async function insertConversion({ sessionId, visitorId, goalId, projectId, tsMs,
                  'imported_from_metrica', true
                ))
        RETURNING id`,
-      [sessionId, visitorId, goalId, tsMs, projectId, visitId, counterId, metricaGoalId]
+      [sessionId, visitorId, goalId, tsMs, projectId, visitKey, counterId, metricaGoalId]
     );
     return { inserted: true, id: rows[0].id };
   } catch (err) {
@@ -181,7 +181,7 @@ async function run({ dryRun, days }) {
           goalId,
           projectId: site.project_id,
           tsMs,
-          visitId: visit.visitID,
+          visitKey: visit.visitKey,
           counterId: Number(site.yandex_counter_id),
           metricaGoalId,
           dryRun,

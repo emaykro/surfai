@@ -179,11 +179,15 @@ async function fetchVisitsByGoal(counterId, goalId, date1ISO, date2ISO) {
     }
   }
 
+  // Reports API does not expose ym:s:visitID as a dimension (error 4041).
+  // We use (clientID, dateTime) as the natural composite key — dateTime is
+  // per-second so collisions for the same visitor within a single second are
+  // not a concern in practice. Dedup downstream is on that composite key.
   const url = new URL(`${MGMT_HOST}/stat/v1/data`);
   url.searchParams.set("ids", String(counterId));
   url.searchParams.set("date1", date1ISO);
   url.searchParams.set("date2", date2ISO);
-  url.searchParams.set("dimensions", "ym:s:visitID,ym:s:clientID,ym:s:dateTime");
+  url.searchParams.set("dimensions", "ym:s:clientID,ym:s:dateTime");
   url.searchParams.set("metrics", "ym:s:visits");
   url.searchParams.set("filters", `ym:s:goal==${goalId}`);
   url.searchParams.set("limit", "10000");
@@ -193,12 +197,15 @@ async function fetchVisitsByGoal(counterId, goalId, date1ISO, date2ISO) {
   const data = Array.isArray(json?.data) ? json.data : [];
   return data.map((row) => {
     const dims = row?.dimensions || [];
+    const clientID = dims[0]?.name ?? null;
+    const dateTime = dims[1]?.name ?? null;
     return {
-      visitID: dims[0]?.name ?? null,
-      clientID: dims[1]?.name ?? null,
-      dateTime: dims[2]?.name ?? null,
+      clientID,
+      dateTime,
+      // Synthetic dedup key: stable per (counter, goal, visitor, second).
+      visitKey: (clientID && dateTime) ? `${counterId}:${goalId}:${clientID}:${dateTime}` : null,
     };
-  }).filter(r => r.visitID && r.clientID && r.dateTime);
+  }).filter(r => r.visitKey);
 }
 
 /**

@@ -1,0 +1,14 @@
+[Unit]
+Description=SURFAI weekly ML retrain (Sun 02:30 MSK)
+Requires=surfai-ml-retrain.service
+
+[Timer]
+# Sunday 02:30 MSK — before the daily backup (03:30) and the weekly
+# metrica token refresh (Sun 04:30), so nothing overlaps.
+OnCalendar=Sun *-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=120
+Unit=surfai-ml-retrain.service
+
+[Install]
+WantedBy=timers.target

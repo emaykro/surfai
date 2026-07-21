@@ -113,6 +113,19 @@ async function run({ dryRun = false } = {}) {
        -- import worker fills metadata.imported_from_metrica). Re-pushing
        -- them as an offline conversion would double-count in Metrica.
        AND (c.metadata->>'imported_from_metrica' IS NULL OR c.metadata->>'imported_from_metrica' = 'false')
+       -- Dedup: an extra-lead goal (e.g. form_submit via
+       -- sites.metrica_extra_lead_goals) duplicates the site's dedicated
+       -- lead% goal when both fired in the same session — push only the
+       -- lead% one. lead_predicted doesn't count as a suppressor: it goes
+       -- to a separate Metrica target and isn't a real lead.
+       AND (g.name ILIKE 'lead%' OR NOT EXISTS (
+             SELECT 1
+               FROM conversions c3
+               JOIN goals g3 ON g3.goal_id = c3.goal_id
+              WHERE c3.session_id = c.session_id
+                AND g3.name ILIKE 'lead%'
+                AND g3.name <> 'lead_predicted'
+           ))
        AND COALESCE(
              sf.metrica_client_id,
              (SELECT sf2.metrica_client_id

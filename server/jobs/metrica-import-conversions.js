@@ -86,14 +86,32 @@ async function loadImportConfigs() {
   return rows;
 }
 
-async function loadGoalIdByName(name, projectId) {
+async function loadGoalByName(name, projectId) {
   const { rows } = await pool.query(
-    `SELECT goal_id FROM goals
+    `SELECT goal_id, is_primary FROM goals
       WHERE name = $1 AND project_id = $2 AND NOT is_deleted
       LIMIT 1`,
     [name, projectId]
   );
-  return rows[0]?.goal_id ?? null;
+  return rows[0] ?? null;
+}
+
+/**
+ * Mark the matched session as converted so imported conversions feed the ML
+ * training labels (session_features.converted is the training target).
+ * UPSERT for the same reason as the server.js conversion paths: the features
+ * row may not exist yet.
+ */
+async function markSessionConverted(sessionId, isPrimary) {
+  await pool.query(
+    `INSERT INTO session_features (session_id, converted, conversion_count${isPrimary ? ", primary_goal_converted" : ""})
+     VALUES ($1, true, 1${isPrimary ? ", true" : ""})
+     ON CONFLICT (session_id) DO UPDATE
+     SET converted = true,
+         conversion_count = COALESCE(session_features.conversion_count, 0) + 1
+         ${isPrimary ? ", primary_goal_converted = true" : ""}`,
+    [sessionId]
+  );
 }
 
 async function insertConversion({ sessionId, visitorId, goalId, projectId, tsMs, visitKey, counterId, metricaGoalId, dryRun }) {
@@ -146,11 +164,12 @@ async function run({ dryRun, days }) {
         continue;
       }
 
-      const goalId = await loadGoalIdByName(surfaiGoalName, site.project_id);
-      if (!goalId) {
+      const goal = await loadGoalByName(surfaiGoalName, site.project_id);
+      if (!goal) {
         console.warn(`  ${site.domain}: SURFAI goal "${surfaiGoalName}" not found in project ${site.project_id}`);
         continue;
       }
+      const goalId = goal.goal_id;
 
       let visits;
       try {
@@ -186,8 +205,10 @@ async function run({ dryRun, days }) {
           metricaGoalId,
           dryRun,
         });
-        if (result.inserted) imported++;
-        else if (result.duplicate) duplicates++;
+        if (result.inserted) {
+          imported++;
+          await markSessionConverted(sessionId, goal.is_primary || false);
+        } else if (result.duplicate) duplicates++;
       }
     }
   }

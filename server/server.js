@@ -1184,13 +1184,16 @@ fastify.post("/api/conversions", { schema: { body: conversionBodySchema }, preHa
   );
   const isPrimary = primaryRes.rows[0]?.is_primary || false;
 
-  // Update session_features
+  // Update session_features. UPSERT: the conversion can arrive before the
+  // first computeAndStore() pass — a plain UPDATE would hit no row and the
+  // label would be silently lost (found 2026-07-22, ~70 sessions affected).
   await pool.query(
-    `UPDATE session_features
+    `INSERT INTO session_features (session_id, converted, conversion_count${isPrimary ? ", primary_goal_converted" : ""})
+     VALUES ($1, true, 1${isPrimary ? ", true" : ""})
+     ON CONFLICT (session_id) DO UPDATE
      SET converted = true,
-         conversion_count = COALESCE(conversion_count, 0) + 1
-         ${isPrimary ? ", primary_goal_converted = true" : ""}
-     WHERE session_id = $1`,
+         conversion_count = COALESCE(session_features.conversion_count, 0) + 1
+         ${isPrimary ? ", primary_goal_converted = true" : ""}`,
     [resolvedSessionId]
   );
 
@@ -1892,13 +1895,16 @@ async function persistGoalConversion(client, sessionId, goalData, projectId) {
   );
   const isPrimary = primaryRes.rows[0]?.is_primary || false;
 
-  // Update session_features converted flag
+  // Update session_features converted flag. UPSERT: the goal event can arrive
+  // in the same batch that first creates the session, before computeAndStore()
+  // has written a features row — a plain UPDATE would lose the label.
   await client.query(
-    `UPDATE session_features
+    `INSERT INTO session_features (session_id, converted, conversion_count${isPrimary ? ", primary_goal_converted" : ""})
+     VALUES ($1, true, 1${isPrimary ? ", true" : ""})
+     ON CONFLICT (session_id) DO UPDATE
      SET converted = true,
-         conversion_count = COALESCE(conversion_count, 0) + 1
-         ${isPrimary ? ", primary_goal_converted = true" : ""}
-     WHERE session_id = $1`,
+         conversion_count = COALESCE(session_features.conversion_count, 0) + 1
+         ${isPrimary ? ", primary_goal_converted = true" : ""}`,
     [sessionId]
   );
 }

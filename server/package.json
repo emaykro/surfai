@@ -15,6 +15,10 @@
     "health:alert": "node jobs/health-alert.js",
     "contact:forward": "node jobs/contact-forward.js",
     "audiences:export": "node jobs/audiences-export.js",
+    "ga4:sync": "node jobs/ga4-conversions.js",
+    "hot-lead:alert": "node jobs/hot-lead-alert.js",
+    "traffic:quality": "node jobs/traffic-quality-audit.js",
+    "crm:sync": "node jobs/crm-sync.js",
     "backup:offsite": "node jobs/backup-offsite.js"
   },
   "keywords": [],

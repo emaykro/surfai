@@ -33,7 +33,9 @@ server/            Node.js ingest server
     geoip.js           MMDB reader singleton (dbip-city + asn), lookup(ip)
     ua-client-hints.js parseUaClientHints(headers) — Sec-CH-UA-* parser
     backfill.js        Batch backfill script for existing sessions
-  migrations/        Numbered SQL migrations (001–013+); see Migrations section below
+  migrations/        Numbered SQL migrations (001–032); see Migrations section below
+  queue/             IngestQueue — in-memory buffer between the ingest reply and
+                     persistence; drained on SIGTERM (see Ingest Queue section)
 dashboard/         Analytics dashboard (vanilla JS, zero deps)
   index.html         Main dashboard page — session list, live feed, replay
 cabinet/           Operator cabinet (vanilla JS, zero deps)
@@ -147,6 +149,17 @@ Every `POST /api/events` body must be:
 | `GET` | `/api/reconciliation/daily?days=30&site_id=X` | Metrica vs SURFAI daily counts from `metrica_daily_reconciliation`. Populated by `npm run metrica:reconcile` on the server. |
 | `GET` | `/api/sites/health` | Per-site health last 48h; detects the "passive-only event mix" fingerprint plus session-drop / install-verified / missing-interaction-types flags. Consumed by `/dashboard/sites.html`. |
 | `GET` | `/api/antifraud/summary?days=7&site_id=X` | Aggregates `is_bot` (hard), `bot_risk_level` (soft), and `geo_is_datacenter` (origin) over the window. Returns totals, by-site, by-utm-source (top 20 sorted by bot share), and top bot ASNs (top 15). Consumed by `/dashboard/antifraud.html`. Pure read of `session_features`; no new ingest path. |
+| `GET` | `/api/analytics/traffic-quality?days=30&dimension=campaign&site_id=X` | Ad-waste view: bot share and intent per campaign/source. Consumed by `/dashboard/traffic-quality.html`. |
+| `GET` | `/api/analytics/b2b-accounts?days=30&site_id=X` | Corporate visitors aggregated by ASN org. Shares its SQL with `/api/b2b/companies` via `fetchB2BAccounts()`. |
+| `GET` | `/api/b2b/companies?days=30&site_id=X` | Same aggregation plus the `b2b_companies` enrichment JOIN (INN/OGRN/address). Consumed by `/dashboard/b2b-accounts.html`. |
+| `POST` | `/api/b2b/companies/enrich` | Force enrichment of one `raw_org` via `getOrEnrichCompany()`. |
+| `GET` | `/api/crm/integrations` | List configured CRM webhooks. |
+| `POST` | `/api/crm/integrations` | Create a CRM webhook integration. |
+| `POST` | `/api/crm/sync-now` | Push pending B2B leads to CRM (`dry_run` supported). |
+| `GET` | `/api/audiences/status` | Per-site Yandex Audiences segments and last export time. |
+| `POST` | `/api/audiences/export` | Run a Yandex Audiences segment export (`dry_run` supported). |
+| `GET` | `/api/ga4/status` | Per-site GA4 config and synced-event counts. |
+| `POST` | `/api/ga4/sync` | Push predicted conversions to GA4 Measurement Protocol (`dry_run` supported). |
 | `GET` | `/api/ml/readiness` | Enriched conversions vs target + 14-day-trailing daily rate + ETA. Drives the header widget on `/dashboard/`. |
 | `GET` | `/api/health` | Aggregate system health: DB, disk, memory, ingest liveness, reconcile-timer age, Metrica-token expiry. Returns HTTP 503 when any check is critical. |
 | `POST` | `/api/projects` | Create project (name, vertical) |
@@ -168,6 +181,8 @@ Dashboard UI (three pages, shared nav):
 - `http://localhost:3000/dashboard/reconciliation.html` — Metrica vs SURFAI daily totals, pivot grid tinted by per-site baseline drift.
 - `http://localhost:3000/dashboard/sites.html` — Per-site health last 48h; detects "passive-only event mix" (tag removed fingerprint), session drops, missing interaction types.
 - `http://localhost:3000/dashboard/antifraud.html` — Bot share by site, UTM source, and ASN over a configurable window (24h/7d/30d/90d). Uses existing `is_bot`/`bot_risk_level`/`geo_is_datacenter` columns; no new collectors or migrations.
+- `http://localhost:3000/dashboard/traffic-quality.html` — Ad-waste view: bot share and intent by campaign/source.
+- `http://localhost:3000/dashboard/b2b-accounts.html` — Corporate visitors by ASN org, with INN/OGRN enrichment.
 
 Operator Cabinet: `http://localhost:3000/cabinet/`
 
@@ -219,6 +234,21 @@ Phases 1–6 complete. Bot detection layer deployed 2026-04-08. Telemetry reliab
 | 015 | `model_scoring.sql` | `model_prediction_score` (DOUBLE PRECISION) + `model_scored_at` (TIMESTAMPTZ) on `session_features`. Populated by `python3 -m ml score` (systemd timer every 5 min). |
 | 016 | `metrica_client_id.sql` | `metrica_client_id` TEXT on `session_features`. Populated from `context` event's `metricaClientId` field (`_ym_uid` cookie). For cross-system Metrica matching. |
 | 017 | `metrica_conversions_sync.sql` | `metrica_synced_at` TIMESTAMPTZ on `conversions`. NULL = not yet pushed to Metrica Offline Conversions API. Populated by `npm run metrica:conversions`. |
+| 018 | `session_local_hour.sql` | `session_local_hour` — hour of day in the visitor's own timezone, derived from `context.ts` + `ctx_timezone`. |
+| 019 | `form_abandon_field_index.sql` | `form_abandon_field_index` — 0-based ordinal of the field where the form was abandoned. |
+| 020 | `copy_event_type.sql` | `copy` in `events_type_check` + `copy_count` on `session_features`. |
+| 021 | `tab_visibility_event_type.sql` | `tab_visibility` in `events_type_check` + tab-focus columns. Emitted once per session via `beforeFlush()`. |
+| 022 | `visitor_id_engagement_delta.sql` | `visitor_id` (from `cross_session`) for cross-session joins + engagement delta columns. |
+| 023 | `behavior_cluster.sql` | `behavior_cluster` — k-means archetype label, assigned by `python3 -m ml cluster`. |
+| 024 | `audiences_exports.sql` | `yandex_audiences_exports` — one row per segment uploaded per site. |
+| 025 | `perf_slow_flags.sql` | Core Web Vitals degradation flags derived from `perf_*` against Google's thresholds. |
+| 026 | `sites_extra_lead_goals.sql` | Per-site override for which goal names are pushed to Metrica as leads. |
+| 027 | `metrica_imports_config.sql` | Per-site config for importing conversions **from** Metrica into SURFAI. |
+| 028 | `goals_metrica_target_name.sql` | Per-goal override for the Metrica "Target" name in Offline Conversions. |
+| 029 | `hot_lead_alerts.sql` | `hot_lead_alerts` — records sent Telegram alerts for high-intent B2B sessions so they aren't re-sent. |
+| 030 | `ad_optimization_ga4_audiences.sql` | `segment_type` on `yandex_audiences_exports` (`hot_lookalike` / `negative_waste`) + GA4 columns on `sites` and `ga4_conversions_exports`. |
+| 031 | `b2b_abm_and_crm.sql` | `b2b_companies` (enriched corporate accounts, `raw_org` UNIQUE) + `crm_integrations`. |
+| 032 | `partitioning_and_retention.sql` | `create_monthly_partition()` and `cleanup_old_raw_batches()` helper functions. **Definitions only — nothing calls them yet, so no partitioning or retention is actually in effect.** |
 
 **Critical rule:** any new `events.type` value requires updating `events_type_check` in a migration in the SAME commit as the SDK change. Otherwise atomic `persistBatch` will reject every batch containing the new type. Learned from the 2026-04-08 incident — see `vault/bugs/2026-04-10 context and session event loss.md`.
 
@@ -427,6 +457,32 @@ Module: `server/features/ua-client-hints.js` — `parseUaClientHints(headers)`. 
 
 Low-entropy hints (`Sec-CH-UA`, `Sec-CH-UA-Mobile`, `Sec-CH-UA-Platform`) arrive automatically on every Chromium request. High-entropy hints (`Sec-CH-UA-Platform-Version`, `Sec-CH-UA-Model`, `Sec-CH-UA-Arch`, `Sec-CH-UA-Bitness`) require the browser to have seen an `Accept-CH` header from our origin — we set one globally via the `onSend` hook as a best-effort opt-in. Cross-origin delivery also depends on the client site's `Permission-Policy`, which we don't control, so high-entropy hints are best-effort.
 
+## Ingest Queue
+
+`POST /api/events` replies `{ok:true}` first, then hands the batch to
+`server/queue/ingest-queue.js` (`IngestQueue`) instead of starting an unbounded
+fire-and-forget promise. The worker drains up to `maxBatchSize` (50) jobs per
+tick and runs `persistBatch → broadcastSSE → computeAndStore` per job. The point
+is bounded concurrency, not lower latency — the reply was already sent before
+any DB work under the old code path.
+
+**Buffered batches are only in memory.** Two rules follow, and both are load-bearing:
+
+1. `flushAndDrain()` must run before the process exits. It is wired through the
+   Fastify `onClose` hook, which only fires because `server.js` installs
+   explicit `SIGTERM`/`SIGINT` handlers that call `fastify.close()`. Without
+   those handlers Node exits immediately on `systemctl restart` and every
+   buffered batch is lost on each deploy.
+2. `flushAndDrain()` must yield to the macrotask queue while a tick is in
+   flight. Retrying `tick()` in a bare loop only schedules microtasks, so the
+   in-flight processor's timers never run and shutdown hangs until systemd
+   sends `SIGKILL`. Covered by `server/__tests__/ingest-queue.test.js`.
+
+Backpressure sheds jobs past `maxQueueSize` (10 000). The SDK has already been
+told `{ok:true}` at that point, so a shed batch is silent data loss:
+`/api/health` reports `ingest_queue` as `critical` when `dropped_total` moved
+since the previous poll, and `warn` above 50% fill.
+
 ## GeoIP Enrichment
 
 Starting 2026-04-10, the ingest path looks up the client IP against local MMDB files at `session_features` UPSERT time and writes the derived `geo_*` columns (country, region, city, timezone, lat/long, ASN, ASN org, `is_datacenter`, `is_mobile_carrier`). The raw IP is **never stored** — it lives only in `request.ip` for the duration of the ingest handler.
@@ -476,3 +532,6 @@ Starting 2026-04-10, the ingest path looks up the client IP against local MMDB f
 | `BACKUP_S3_BUCKET` | (empty) | Bucket name. Must already exist with write permissions for the access key. |
 | `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | (empty) | Access key id / secret key with `storage.editor`-equivalent permission scoped to the bucket. |
 | `BACKUP_S3_PREFIX` | (empty → upload to bucket root) | Optional path prefix inside the bucket, e.g. `surfai/`. |
+| `INGEST_SILENCE_WARN_SEC` | `900` | Age of the newest batch (seconds) at which `/api/health` marks `ingest_recent` as `warn`. |
+| `INGEST_SILENCE_CRIT_SEC` | `3600` | Same, for `critical`. Do not widen these to silence flapping — that is what `ALERT_CONFIRM_TICKS` is for. |
+| `ALERT_CONFIRM_TICKS` | `2` | Consecutive `health:alert` polls a check must report the same non-ok level before it pages. Recovery to `ok` is always reported immediately. |

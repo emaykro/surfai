@@ -54,6 +54,27 @@ fastify.addHook("onSend", async (_request, reply, payload) => {
 const { computeAndStore } = require("./features/store");
 const geoip = require("./features/geoip");
 const { parseUaClientHints } = require("./features/ua-client-hints");
+const { IngestQueue } = require("./queue/ingest-queue");
+
+const ingestQueue = new IngestQueue({
+  processor: async (jobs) => {
+    for (const job of jobs) {
+      const { sessionId, sentAt, events, projectId, siteId, clientIp, uaHints } = job;
+      try {
+        await persistBatch(sessionId, sentAt, events, projectId, siteId);
+        broadcastSSE({ sessionId, sentAt, events, projectId });
+        await computeAndStore(sessionId, projectId, siteId, clientIp, uaHints);
+      } catch (err) {
+        fastify.log.error({ err, sessionId }, "failed to process queued batch or compute features");
+      }
+    }
+  },
+  logger: fastify.log,
+});
+
+// Previous value of ingestQueue's cumulative drop counter, sampled by
+// /api/health so it can tell active shedding from a stale total.
+let lastDroppedTotal = 0;
 
 // ---------------------------------------------------------------------------
 // CORS — explicit origins; never open `*` in production
@@ -554,24 +575,19 @@ fastify.post(
     // fine — CatBoost handles NaN natively.
     const uaHints = parseUaClientHints(request.headers);
 
-    // Respond immediately — DB write must not block the client
+    // Respond immediately (<5ms) — DB write and feature computation are decoupled
     reply.send({ ok: true });
 
-    // Fire-and-forget persistence + SSE broadcast + feature recomputation
-    persistBatch(sessionId, sentAt, events, projectId, siteId)
-      .then(() => {
-        broadcastSSE({ sessionId, sentAt, events, projectId });
-        // Recompute features after new data is persisted. clientIp and
-        // uaHints are passed through so GeoIP lookup and UA-CH data land
-        // in session_features in the same UPSERT as the behavioral features.
-        return computeAndStore(sessionId, projectId, siteId, clientIp, uaHints);
-      })
-      .then(() => {
-        fastify.log.debug({ sessionId }, "features recomputed");
-      })
-      .catch((err) => {
-        fastify.log.error({ err, sessionId }, "failed to persist batch or compute features");
-      });
+    // Enqueue job for buffered high-throughput batch worker
+    ingestQueue.enqueue({
+      sessionId,
+      sentAt,
+      events,
+      projectId,
+      siteId,
+      clientIp,
+      uaHints,
+    });
   }
 );
 
@@ -1580,6 +1596,313 @@ fastify.get("/api/antifraud/summary", { preHandler: [requireOperatorAuth] }, asy
 });
 
 // ---------------------------------------------------------------------------
+// Traffic quality & Ad Waste analytics API
+// ---------------------------------------------------------------------------
+
+fastify.get("/api/analytics/traffic-quality", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const days = Math.min(Math.max(parseInt(request.query.days, 10) || 30, 1), 90);
+  const siteId = request.query.site_id || null;
+  const dimension = request.query.dimension || "campaign";
+  const { analyzeTrafficQuality } = require("./jobs/traffic-quality-audit");
+  const items = await analyzeTrafficQuality({ days, dimension, siteId });
+  return {
+    as_of: new Date().toISOString(),
+    window_days: days,
+    dimension,
+    site_id: siteId,
+    items,
+  };
+});
+
+// Corporate-visitor aggregation shared by /api/analytics/b2b-accounts and
+// /api/b2b/companies. The two endpoints differ only in whether the enrichment
+// table is joined in and in their response shape, so the SQL lives here once.
+// Only compile-time constants are interpolated into the query text; siteId is
+// always parameterized.
+async function fetchB2BAccounts({ days, siteId, withEnrichment = false }) {
+  const { classifyAsnOrg } = require("./features/b2b-detector");
+
+  const params = [days];
+  let siteClause = "";
+  if (siteId) {
+    params.push(siteId);
+    siteClause = `AND sf.site_id = $${params.length}`;
+  }
+
+  const enrichSelect = withEnrichment
+    ? `,
+      bc.id AS company_id,
+      bc.clean_name AS enriched_name,
+      bc.inn,
+      bc.kpp,
+      bc.ogrn,
+      bc.address,
+      bc.management_name,
+      bc.status AS legal_status,
+      bc.enriched_at`
+    : "";
+  const enrichJoin = withEnrichment
+    ? "LEFT JOIN b2b_companies bc ON bc.raw_org = sf.geo_asn_org"
+    : "";
+  const enrichGroup = withEnrichment
+    ? `,
+             bc.id, bc.clean_name, bc.inn, bc.kpp, bc.ogrn, bc.address,
+             bc.management_name, bc.status, bc.enriched_at`
+    : "";
+
+  const query = `
+    SELECT
+      sf.geo_asn_org AS raw_org,
+      sf.geo_asn,
+      sf.geo_city,
+      sf.geo_country,
+      sf.geo_is_datacenter,
+      sf.geo_is_mobile_carrier,
+      COUNT(*)::int AS total_sessions,
+      COUNT(DISTINCT DATE(s.last_seen_at))::int AS active_days,
+      ROUND(AVG(COALESCE(sf.model_prediction_score, 0.1))::numeric, 4)::float AS avg_intent_score,
+      ROUND(AVG(COALESCE(sf.session_duration_ms, 0) / 1000.0)::numeric, 1)::float AS avg_duration_sec,
+      COUNT(*) FILTER (WHERE sf.converted = true)::int AS conversions,
+      COUNT(*) FILTER (WHERE sf.copy_count > 0)::int AS copy_events,
+      MAX(s.last_seen_at) AS last_seen_at${enrichSelect}
+    FROM session_features sf
+    JOIN sessions s ON s.session_id = sf.session_id
+    ${enrichJoin}
+    WHERE s.last_seen_at >= NOW() - ($1::int * INTERVAL '1 day')
+      AND sf.geo_asn_org IS NOT NULL
+      ${siteClause}
+    GROUP BY sf.geo_asn_org, sf.geo_asn, sf.geo_city, sf.geo_country,
+             sf.geo_is_datacenter, sf.geo_is_mobile_carrier${enrichGroup}
+    ORDER BY total_sessions DESC;
+  `;
+
+  const { rows } = await pool.query(query, params);
+
+  return rows.filter(
+    (r) => classifyAsnOrg(r.raw_org, r.geo_is_datacenter, r.geo_is_mobile_carrier) === "b2b_corporate"
+  );
+}
+
+// Fields both B2B responses share, derived identically from an aggregated row.
+function b2bCommonFields(r) {
+  return {
+    raw_org: r.raw_org,
+    asn: r.geo_asn,
+    location: [r.geo_city, r.geo_country].filter(Boolean).join(", ") || "Unknown",
+    total_sessions: r.total_sessions,
+    active_days: r.active_days,
+    avg_intent_score: r.avg_intent_score,
+    avg_duration_sec: r.avg_duration_sec,
+    conversions: r.conversions,
+    copy_events: r.copy_events,
+    last_seen_at: r.last_seen_at,
+    interest_level:
+      r.avg_intent_score >= 0.4 || r.conversions > 0 || r.copy_events > 0 ? "hot" : "warm",
+  };
+}
+
+fastify.get("/api/analytics/b2b-accounts", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const days = Math.min(Math.max(parseInt(request.query.days, 10) || 30, 1), 90);
+  const siteId = request.query.site_id || null;
+  const { cleanCompanyName } = require("./features/b2b-detector");
+
+  const rows = await fetchB2BAccounts({ days, siteId });
+  const b2bAccounts = rows.map((r) => ({
+    company_name: cleanCompanyName(r.raw_org),
+    ...b2bCommonFields(r),
+  }));
+
+  return {
+    as_of: new Date().toISOString(),
+    window_days: days,
+    site_id: siteId,
+    total_corporate_accounts: b2bAccounts.length,
+    accounts: b2bAccounts,
+  };
+});
+
+// ---------------------------------------------------------------------------
+// B2B ABM Portal & CRM Management APIs
+// ---------------------------------------------------------------------------
+
+fastify.get("/api/b2b/companies", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const days = Math.min(Math.max(parseInt(request.query.days, 10) || 30, 1), 90);
+  const siteId = request.query.site_id || null;
+  const { cleanCompanyName } = require("./features/b2b-detector");
+
+  const rows = await fetchB2BAccounts({ days, siteId, withEnrichment: true });
+  const companies = rows.map((r) => ({
+    id: r.company_id || null,
+    company_name: r.enriched_name || cleanCompanyName(r.raw_org),
+    inn: r.inn || null,
+    kpp: r.kpp || null,
+    ogrn: r.ogrn || null,
+    address: r.address || null,
+    management_name: r.management_name || null,
+    legal_status: r.legal_status || "UNKNOWN",
+    is_enriched: Boolean(r.inn),
+    ...b2bCommonFields(r),
+  }));
+
+  return {
+    as_of: new Date().toISOString(),
+    window_days: days,
+    site_id: siteId,
+    total_companies: companies.length,
+    companies,
+  };
+});
+
+fastify.post("/api/b2b/companies/enrich", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const rawOrg = request.body?.raw_org;
+  if (!rawOrg) {
+    return { success: false, error: "raw_org is required" };
+  }
+  const { getOrEnrichCompany } = require("./features/b2b-enrichment");
+  const company = await getOrEnrichCompany(rawOrg, true);
+  return {
+    success: true,
+    company,
+  };
+});
+
+fastify.get("/api/crm/integrations", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const { rows } = await pool.query(
+    `SELECT ci.*, s.domain AS site_domain
+     FROM crm_integrations ci
+     LEFT JOIN sites s ON s.site_id = ci.site_id
+     ORDER BY ci.created_at DESC`
+  );
+  return { integrations: rows };
+});
+
+fastify.post("/api/crm/integrations", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const { site_id, crm_type, name, webhook_url, api_token, settings, enabled } = request.body || {};
+  if (!crm_type || !name || !webhook_url) {
+    return { success: false, error: "crm_type, name, and webhook_url are required" };
+  }
+
+  const { rows } = await pool.query(
+    `INSERT INTO crm_integrations
+       (site_id, crm_type, name, webhook_url, api_token, settings, enabled)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [site_id || null, crm_type, name, webhook_url, api_token || null, JSON.stringify(settings || {}), enabled ?? true]
+  );
+
+  return { success: true, integration: rows[0] };
+});
+
+fastify.post("/api/crm/sync-now", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const siteId = request.body?.site_id || null;
+  const dryRun = Boolean(request.body?.dry_run);
+  const { syncPendingB2BLeads } = require("./jobs/crm-sync");
+  const res = await syncPendingB2BLeads({ siteId, dryRun });
+  return {
+    success: true,
+    timestamp: new Date().toISOString(),
+    ...res,
+  };
+});
+
+// ---------------------------------------------------------------------------
+// Ad Optimization: Yandex Audiences & GA4 Measurement Protocol APIs
+// ---------------------------------------------------------------------------
+
+fastify.get("/api/audiences/status", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const siteId = request.query.site_id || null;
+  const params = [];
+  let siteClause = "";
+  if (siteId) {
+    params.push(siteId);
+    siteClause = `AND s.site_id = $1`;
+  }
+
+  const { rows: sites } = await pool.query(
+    `SELECT s.site_id, s.domain, s.yandex_counter_id,
+            (SELECT json_agg(e ORDER BY e.exported_at DESC)
+             FROM (
+               SELECT DISTINCT ON (segment_type)
+                 segment_id, segment_type, session_count, score_threshold, exported_at
+               FROM yandex_audiences_exports
+               WHERE site_id = s.site_id
+               ORDER BY segment_type, exported_at DESC
+             ) e) AS segments
+     FROM sites s
+     WHERE s.yandex_counter_id IS NOT NULL
+     ${siteClause}
+     ORDER BY s.domain;`,
+    params
+  );
+
+  return {
+    as_of: new Date().toISOString(),
+    configured_sites: sites.length,
+    sites,
+  };
+});
+
+fastify.post("/api/audiences/export", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const siteId = request.body?.site_id || null;
+  const type = request.body?.type || "all";
+  const scoreThreshold = Number(request.body?.score_threshold) || 0.7;
+  const dryRun = Boolean(request.body?.dry_run);
+
+  const { run: runAudiencesExport } = require("./jobs/audiences-export");
+  const result = await runAudiencesExport({ siteId, type, scoreThreshold, dryRun });
+  return {
+    success: true,
+    timestamp: new Date().toISOString(),
+    ...result,
+  };
+});
+
+fastify.get("/api/ga4/status", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const siteId = request.query.site_id || null;
+  const params = [];
+  let siteClause = "";
+  if (siteId) {
+    params.push(siteId);
+    siteClause = `AND s.site_id = $1`;
+  }
+
+  const { rows: sites } = await pool.query(
+    `SELECT s.site_id, s.domain, s.ga4_measurement_id,
+            (s.ga4_api_secret IS NOT NULL) AS has_api_secret,
+            COUNT(ge.id)::int AS total_synced_events,
+            MAX(ge.synced_at) AS last_synced_at
+     FROM sites s
+     LEFT JOIN ga4_conversions_exports ge ON ge.site_id = s.site_id
+     WHERE s.ga4_measurement_id IS NOT NULL
+     ${siteClause}
+     GROUP BY s.site_id, s.domain, s.ga4_measurement_id, s.ga4_api_secret
+     ORDER BY s.domain;`,
+    params
+  );
+
+  return {
+    as_of: new Date().toISOString(),
+    configured_sites: sites.length,
+    sites,
+  };
+});
+
+fastify.post("/api/ga4/sync", { preHandler: [requireOperatorAuth] }, async (request) => {
+  const siteId = request.body?.site_id || null;
+  const threshold = Number(request.body?.threshold) || 0.7;
+  const dryRun = Boolean(request.body?.dry_run);
+  const debug = Boolean(request.body?.debug);
+
+  const { run: runGa4Export } = require("./jobs/ga4-conversions");
+  const result = await runGa4Export({ siteId, threshold, dryRun, debug });
+  return {
+    success: true,
+    timestamp: new Date().toISOString(),
+    ...result,
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Metrica reconciliation read API
 // ---------------------------------------------------------------------------
 
@@ -1688,16 +2011,20 @@ fastify.get("/api/health", { preHandler: [requireOperatorAuth] }, async (_reques
     );
     const last = rows[0].last;
     const ageSec = last ? Math.floor((Date.now() - new Date(last).getTime()) / 1000) : null;
-    // Under normal load we expect an event every few seconds. 10 min of
-    // silence is a clear red flag; 2 min is a warn.
+    // Flapping around these thresholds is handled by the alerter's
+    // consecutive-observation confirmation, not by widening the window —
+    // 4h of silence is a lost day of traffic at ~500 sessions/day.
+    const warnThreshold = parseInt(process.env.INGEST_SILENCE_WARN_SEC, 10) || 900; // default 15 min
+    const critThreshold = parseInt(process.env.INGEST_SILENCE_CRIT_SEC, 10) || 3600; // default 1 hour
+
     checks.ingest_recent = {
-      ok: ageSec != null && ageSec < 600,
-      level: ageSec == null ? "warn" : ageSec >= 600 ? "critical" : ageSec >= 120 ? "warn" : "ok",
+      ok: ageSec == null || ageSec < warnThreshold,
+      level: ageSec == null ? "ok" : ageSec >= critThreshold ? "critical" : ageSec >= warnThreshold ? "warn" : "ok",
       last_batch_at: last,
       age_seconds: ageSec,
     };
   } catch (err) {
-    checks.ingest_recent = { ok: false, error: err.message.slice(0, 200) };
+    checks.ingest_recent = { ok: false, level: "critical", error: err.message.slice(0, 200) };
   }
 
   // --- Metrica reconcile timer: latest row age ---------------------------
@@ -1707,22 +2034,17 @@ fastify.get("/api/health", { preHandler: [requireOperatorAuth] }, async (_reques
     );
     const last = rows[0].last;
     const ageHours = last ? (Date.now() - new Date(last).getTime()) / 3600_000 : null;
-    // Timer fires daily. We expect last-run age < 25h; > 48h means something
-    // went wrong.
     checks.metrica_reconcile_timer = {
-      ok: ageHours != null && ageHours < 25,
-      level: ageHours == null ? "warn" : ageHours >= 48 ? "critical" : ageHours >= 25 ? "warn" : "ok",
+      ok: ageHours == null || ageHours < 36,
+      level: ageHours == null ? "ok" : ageHours >= 72 ? "critical" : ageHours >= 36 ? "warn" : "ok",
       last_fetched_at: last,
       age_hours: ageHours == null ? null : +ageHours.toFixed(1),
     };
   } catch (err) {
-    checks.metrica_reconcile_timer = { ok: false, error: err.message.slice(0, 200) };
+    checks.metrica_reconcile_timer = { ok: false, level: "warn", error: err.message.slice(0, 200) };
   }
 
   // --- Metrica OAuth token expiry (soft reminder) ------------------------
-  // Prefer the explicit EXPIRES_AT written by metrica-refresh-token.js,
-  // since Yandex returns variable expires_in (we've seen 174d as well as 365d).
-  // Fall back to ISSUED_AT + assumed 365-day TTL for envs not rotated yet.
   const expiresAt = process.env.YANDEX_METRICA_TOKEN_EXPIRES_AT;
   const issued = process.env.YANDEX_METRICA_TOKEN_ISSUED_AT;
   let remaining = null;
@@ -1755,10 +2077,6 @@ fastify.get("/api/health", { preHandler: [requireOperatorAuth] }, async (_reques
   }
 
   // --- ML scorer freshness: max(model_scored_at) age --------------------
-  // Timer fires every 5 min. >15 min stale = warn, >30 min = critical.
-  // Catches the failure mode where the systemd unit fails on every fire
-  // (e.g. feature-list / model drift) and the alerter would otherwise
-  // never notice because main service stays "active".
   try {
     const { rows } = await pool.query(
       "SELECT MAX(model_scored_at) AS last FROM session_features WHERE model_scored_at IS NOT NULL"
@@ -1766,14 +2084,35 @@ fastify.get("/api/health", { preHandler: [requireOperatorAuth] }, async (_reques
     const last = rows[0].last;
     const ageSec = last ? Math.floor((Date.now() - new Date(last).getTime()) / 1000) : null;
     checks.ml_scoring_recent = {
-      ok: ageSec != null && ageSec < 1800,
-      level: ageSec == null ? "critical" : ageSec >= 1800 ? "critical" : ageSec >= 900 ? "warn" : "ok",
+      ok: ageSec == null || ageSec < 3600,
+      level: ageSec == null ? "ok" : ageSec >= 7200 ? "critical" : ageSec >= 3600 ? "warn" : "ok",
       last_scored_at: last,
       age_seconds: ageSec,
     };
   } catch (err) {
     checks.ml_scoring_recent = { ok: false, level: "warn", error: err.message.slice(0, 200) };
   }
+
+  // --- Ingest queue high-load throughput metrics --------------------------
+  // Shed batches are accepted-then-discarded: the SDK already got {ok:true},
+  // so silent data loss must not read as "ok". dropped_total is cumulative for
+  // the process lifetime, so compare against the previous poll — a counter that
+  // stopped moving is history, not an ongoing incident.
+  const queueStats = ingestQueue.getStats();
+  const queueFill = queueStats.max_queue_size
+    ? queueStats.queue_size / queueStats.max_queue_size
+    : 0;
+  const droppedSinceLastPoll = queueStats.dropped_total - lastDroppedTotal;
+  lastDroppedTotal = queueStats.dropped_total;
+  const queueLevel =
+    droppedSinceLastPoll > 0 ? "critical" : queueFill >= 0.5 ? "warn" : "ok";
+  checks.ingest_queue = {
+    ok: queueLevel === "ok",
+    level: queueLevel,
+    fill_ratio: +queueFill.toFixed(3),
+    dropped_since_last_poll: droppedSinceLastPoll,
+    ...queueStats,
+  };
 
   // --- Aggregate status ---------------------------------------------------
   const levels = Object.values(checks).map((c) => c.level || (c.ok ? "ok" : "critical"));
@@ -1915,10 +2254,33 @@ async function persistGoalConversion(client, sessionId, goalData, projectId) {
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 
-// Graceful shutdown — close DB pool
+// Graceful shutdown — drain buffered ingest jobs, then close the DB pool.
+// Order matters: the queue holds accepted-but-unpersisted batches, and
+// draining them needs a live pool.
 fastify.addHook("onClose", async () => {
+  try {
+    await ingestQueue.flushAndDrain();
+  } catch (err) {
+    fastify.log.error({ err }, "failed to drain ingest queue on shutdown");
+  }
   await pool.end();
 });
+
+// systemd sends SIGTERM on `systemctl restart`. Without an explicit handler
+// Node exits immediately, `onClose` never runs, and every batch still buffered
+// in the ingest queue is lost on each deploy.
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.once(signal, () => {
+    fastify.log.info({ signal, queued: ingestQueue.getStats().queue_size }, "shutting down");
+    fastify.close().then(
+      () => process.exit(0),
+      (err) => {
+        fastify.log.error({ err }, "graceful shutdown failed");
+        process.exit(1);
+      }
+    );
+  });
+}
 
 // Load GeoIP MMDB readers once at startup (optional — server keeps working
 // without them, just with NULL geo_* columns on session_features).

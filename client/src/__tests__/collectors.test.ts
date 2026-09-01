@@ -5,6 +5,7 @@ import { ContextCollector } from "../collectors/context";
 import { CrossSessionCollector } from "../collectors/cross-session";
 import { SessionCollector } from "../collectors/session";
 import { PerformanceCollector } from "../collectors/performance";
+import { IntentTriggerCollector } from "../collectors/intent-trigger";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -422,6 +423,37 @@ describe("SessionCollector", () => {
     const sessionEvents = body.events.filter((e: { type: string }) => e.type === "session");
     expect(sessionEvents.length).toBe(1);
 
+    tracker.stop();
+  });
+});
+
+describe("IntentTriggerCollector & onHighIntent", () => {
+  it("fires onHighIntent subscriber when trigger conditions are met", () => {
+    const tracker = createTracker();
+    const trigger = new IntentTriggerCollector(tracker);
+    tracker.addCollector(trigger);
+
+    let receivedSignal: any = null;
+    const unsub = tracker.onHighIntent((signal) => {
+      receivedSignal = signal;
+    });
+
+    tracker.start();
+
+    // Trigger synthetic intent signal
+    tracker.notifyIntent({
+      level: "high",
+      scoreEstimate: 0.85,
+      reasons: ["test_trigger"],
+      elapsedMs: 45000,
+    });
+
+    expect(receivedSignal).not.toBeNull();
+    expect(receivedSignal.level).toBe("high");
+    expect(receivedSignal.scoreEstimate).toBe(0.85);
+
+    // Unsubscribe
+    unsub();
     tracker.stop();
   });
 });

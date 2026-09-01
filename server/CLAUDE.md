@@ -43,7 +43,9 @@ Any schema change — adding a field, adding a new event `type`, changing an enu
 ## Persistence
 
 - When writing to Postgres, use parameterized queries exclusively (`$1`, `$2`). Never build SQL by string concatenation.
-- Database writes must not block the HTTP response. Enqueue or fire-and-forget after reply.
+- Database writes must not block the HTTP response. The route replies first and
+  enqueues onto `IngestQueue` (`server/queue/ingest-queue.js`); see the Ingest
+  Queue section in the root `CLAUDE.md` for the shutdown-drain requirements.
 - Connection pooling is required for production; use `pg.Pool`, not `pg.Client` per request.
 
 ## Logging
@@ -67,6 +69,9 @@ Any schema change — adding a field, adding a new event `type`, changing an enu
 | `OPERATOR_API_TOKEN` | — (empty = all operator endpoints return 401) | Bearer token for operator/dashboard API |
 | `ALLOW_INGEST_WITHOUT_SITEKEY` | `false` | Set `true` for local dev without siteKey setup |
 | `LOG_LEVEL` | `info` | Pino log level |
+| `INGEST_SILENCE_WARN_SEC` | `900` | `/api/health` `ingest_recent` warn threshold, seconds |
+| `INGEST_SILENCE_CRIT_SEC` | `3600` | `/api/health` `ingest_recent` critical threshold, seconds |
+| `ALERT_CONFIRM_TICKS` | `2` | Consecutive polls a non-ok level must persist before `health:alert` pages |
 | `CONTACT_BOT_TOKEN` | (empty → contact:forward aborts) | @Surfaiask_bot token; polls for lead messages and sends auto-replies. Consumed by `server/jobs/contact-forward.js`. |
 | `API_BASE_URL` | `https://surfai.ru` | Base URL used by job scripts that construct self-referencing URLs. Not used by `server.js`. |
 

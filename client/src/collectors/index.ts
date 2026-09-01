@@ -5,3 +5,7 @@ export { SessionCollector } from "./session.js";
 export { ContextCollector } from "./context.js";
 export { CrossSessionCollector } from "./cross-session.js";
 export { BotSignalCollector } from "./bot-signals.js";
+export { PerformanceCollector } from "./performance.js";
+export { CopyCollector } from "./copy.js";
+export { TabVisibilityCollector } from "./tab-visibility.js";
+export { IntentTriggerCollector } from "./intent-trigger.js";

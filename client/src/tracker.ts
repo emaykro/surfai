@@ -8,11 +8,13 @@
  * to prevent accidental capture of sensitive user data.
  */
 
-import type { TrackingEvent, TrackerOptions, Collector, PageGoalRule, DataLayerMapping } from "./types.js";
+import type { TrackingEvent, TrackerOptions, Collector, PageGoalRule, DataLayerMapping, WidgetConfig } from "./types.js";
 import { isInputElement, scrollPercent, now, getSessionId } from "./helpers.js";
+import { SmartWidgetEngine } from "./widget.js";
 
-// Re-export public types
-export type { TrackingEvent, TrackerOptions, PageGoalRule, DataLayerMapping, GoalEventData } from "./types.js";
+// Re-export public types and classes
+export type { TrackingEvent, TrackerOptions, PageGoalRule, DataLayerMapping, GoalEventData, WidgetConfig } from "./types.js";
+export { SmartWidgetEngine } from "./widget.js";
 
 // ---------------------------------------------------------------------------
 // Tracker (orchestrator)
@@ -58,6 +60,10 @@ export class SurfaiTracker {
   private metrikaCapture: boolean;
   private origYm: ((...args: unknown[]) => void) | null = null;
 
+  /** Intent callbacks registered via onHighIntent() */
+  private intentCallbacks: import("./types.js").IntentCallback[] = [];
+  private intentTriggered = false;
+
   /** Batch limits (per sdk-constraints.mdc) */
   private static readonly MAX_EVENTS_PER_FLUSH = 100;
   private static readonly MAX_PAYLOAD_BYTES = 64 * 1024;
@@ -87,7 +93,13 @@ export class SurfaiTracker {
       ...(opts.dataLayerMappings ?? []),
     ];
     this.metrikaCapture = opts.metrikaCapture ?? false;
+    if (opts.personalization?.enabled !== false && opts.personalization) {
+      this.widget = new SmartWidgetEngine(this, opts.personalization);
+    }
   }
+
+  /** Smart personalization & retention widget instance */
+  public widget: SmartWidgetEngine | null = null;
 
   // --- Public API ----------------------------------------------------------
 
@@ -133,6 +145,30 @@ export class SurfaiTracker {
       type: "goal",
       data: { goalId, metadata, ts: t },
     });
+  }
+
+  /**
+   * Subscribe to high-intent on-page signals (readiness to convert, exit intent).
+   * Returns an unsubscribe function.
+   */
+  onHighIntent(cb: import("./types.js").IntentCallback): () => void {
+    this.intentCallbacks.push(cb);
+    return () => {
+      this.intentCallbacks = this.intentCallbacks.filter((c) => c !== cb);
+    };
+  }
+
+  /** Notify all intent subscribers. Called by collectors. */
+  notifyIntent(signal: import("./types.js").IntentSignal): void {
+    if (this.intentTriggered) return;
+    this.intentTriggered = true;
+    for (const cb of this.intentCallbacks) {
+      try {
+        cb(signal);
+      } catch {
+        // Suppress callback errors to never break host page
+      }
+    }
   }
 
   start(): void {

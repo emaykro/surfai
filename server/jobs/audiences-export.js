@@ -1,27 +1,28 @@
 "use strict";
 
 /**
- * Export high-intent unconverted sessions to Yandex Audiences for retargeting.
+ * Export behavioral segments to Yandex Audiences for Yandex Direct targeting & exclusion.
  *
- * For each site with a yandex_counter_id:
- *   1. Selects sessions where model_prediction_score >= SCORE_THRESHOLD,
- *      metrica_client_id IS NOT NULL, and no conversion recorded.
- *   2. Uploads a CSV of Metrica clientIds (_ym_uid values) to the
- *      Yandex Audiences API (ClientID segment type).
- *   3. Deletes the previous segment for that site before creating the new one.
- *   4. Records the new segment_id in yandex_audiences_exports.
+ * Supported segment types:
+ *   1. hot_lookalike:
+ *      Sessions with model_prediction_score >= SCORE_THRESHOLD (default 0.7),
+ *      metrica_client_id IS NOT NULL, not converted, and not bots.
+ *      Used for Direct Look-alike & Retargeting.
+ *
+ *   2. negative_waste:
+ *      Sessions identified as bots (is_bot = true), datacenter IPs (geo_is_datacenter = true),
+ *      or extreme bounces (duration < 3s with 0 clicks & 0 scroll).
+ *      Used in Direct for bid adjustment -100% (negative audience to stop ad waste).
  *
  * Usage:
  *   node server/jobs/audiences-export.js
- *   node server/jobs/audiences-export.js --score 0.8   # custom threshold
- *   node server/jobs/audiences-export.js --dry-run     # print CSV, no API calls
+ *   node server/jobs/audiences-export.js --type=all          # export both hot and negative (default)
+ *   node server/jobs/audiences-export.js --type=hot          # export only hot lookalike
+ *   node server/jobs/audiences-export.js --type=negative     # export only negative waste
+ *   node server/jobs/audiences-export.js --score=0.7         # custom hot score threshold
+ *   node server/jobs/audiences-export.js --dry-run           # print summary, no API calls
  *
  * Requires: YANDEX_AUDIENCES_TOKEN in environment (ym:audience:write scope).
- *
- * Exit codes:
- *   0  success (or dry-run or no-op when < MIN_LOOKALIKE_COUNT sessions)
- *   1  unexpected error
- *   2  token missing
  */
 
 require("dotenv").config({ path: require("path").join(__dirname, "../../.env") });
@@ -29,7 +30,7 @@ require("dotenv").config({ path: require("path").join(__dirname, "../../.env") }
 const { pool } = require("../db.js");
 
 const AUDIENCES_BASE = "https://api-audience.yandex.ru/v1/management";
-const MIN_LOOKALIKE_COUNT = 100;
+const MIN_SEGMENT_COUNT = 100;
 const DEFAULT_SCORE_THRESHOLD = 0.7;
 
 function getToken() {
@@ -46,7 +47,7 @@ function authHeaders() {
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function uploadCsv(csvContent, dryRun) {
+async function uploadCsv(csvContent, filename = "audience.csv", dryRun = false) {
   if (dryRun) {
     console.log(`[dry-run] would upload CSV (${csvContent.split("\n").length} rows)`);
     return "dry-run-segment-id";
@@ -56,7 +57,7 @@ async function uploadCsv(csvContent, dryRun) {
   form.append(
     "file",
     new Blob([csvContent], { type: "text/csv" }),
-    "lookalike.csv"
+    filename
   );
 
   const res = await fetch(`${AUDIENCES_BASE}/segments/upload_csv_file`, {
@@ -74,7 +75,7 @@ async function uploadCsv(csvContent, dryRun) {
   return data.segment?.id ?? data.id;
 }
 
-async function confirmSegment(segmentId, name, counterId, dryRun) {
+async function confirmSegment(segmentId, name, counterId, dryRun = false) {
   if (dryRun) {
     console.log(`[dry-run] would confirm segment ${segmentId} → "${name}" on counter ${counterId}`);
     return;
@@ -95,7 +96,7 @@ async function confirmSegment(segmentId, name, counterId, dryRun) {
   }
 }
 
-async function deleteSegment(segmentId, dryRun) {
+async function deleteSegment(segmentId, dryRun = false) {
   if (dryRun) {
     console.log(`[dry-run] would delete old segment ${segmentId}`);
     return;
@@ -116,17 +117,28 @@ async function deleteSegment(segmentId, dryRun) {
 // DB helpers
 // ---------------------------------------------------------------------------
 
-async function fetchSites() {
+async function fetchSites(siteId = null) {
+  const params = [];
+  let where = "WHERE yandex_counter_id IS NOT NULL";
+  if (siteId) {
+    params.push(siteId);
+    where += " AND site_id = $1";
+  }
+
   const { rows } = await pool.query(
     `SELECT site_id, domain, yandex_counter_id
      FROM sites
-     WHERE yandex_counter_id IS NOT NULL
-     ORDER BY domain`
+     ${where}
+     ORDER BY domain`,
+    params
   );
   return rows;
 }
 
-async function fetchHighIntentSessions(siteId, scoreThreshold) {
+/**
+ * High-intent unconverted sessions for lookalike targeting.
+ */
+async function fetchHighIntentSessions(siteId, scoreThreshold = DEFAULT_SCORE_THRESHOLD) {
   const { rows } = await pool.query(
     `SELECT sf.metrica_client_id
      FROM session_features sf
@@ -134,6 +146,7 @@ async function fetchHighIntentSessions(siteId, scoreThreshold) {
        AND sf.metrica_client_id IS NOT NULL
        AND sf.model_prediction_score >= $2
        AND (sf.is_bot IS NULL OR sf.is_bot = false)
+       AND (sf.geo_is_datacenter IS NULL OR sf.geo_is_datacenter = false)
        AND NOT EXISTS (
          SELECT 1 FROM conversions c WHERE c.session_id = sf.session_id
        )`,
@@ -142,100 +155,194 @@ async function fetchHighIntentSessions(siteId, scoreThreshold) {
   return rows.map((r) => r.metrica_client_id);
 }
 
-async function fetchPreviousSegment(siteId) {
+/**
+ * Negative / waste sessions (bots, datacenters, micro-bounces) for negative targeting (-100% bid adjustment).
+ */
+async function fetchNegativeWasteSessions(siteId) {
+  const { rows } = await pool.query(
+    `SELECT sf.metrica_client_id
+     FROM session_features sf
+     WHERE sf.site_id = $1
+       AND sf.metrica_client_id IS NOT NULL
+       AND (
+         sf.is_bot = true
+         OR sf.geo_is_datacenter = true
+         OR sf.bot_risk_level = 'high'
+         OR (
+           COALESCE(sf.session_duration_ms, 0) < 3000
+           AND COALESCE(sf.click_count, 0) = 0
+           AND COALESCE(sf.scroll_max_depth, 0) = 0
+         )
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM conversions c WHERE c.session_id = sf.session_id
+       )`,
+    [siteId]
+  );
+  return rows.map((r) => r.metrica_client_id);
+}
+
+async function fetchPreviousSegment(siteId, segmentType = "hot_lookalike") {
   const { rows } = await pool.query(
     `SELECT segment_id FROM yandex_audiences_exports
-     WHERE site_id = $1
+     WHERE site_id = $1 AND segment_type = $2
      ORDER BY exported_at DESC
      LIMIT 1`,
-    [siteId]
+    [siteId, segmentType]
   );
   return rows[0]?.segment_id ?? null;
 }
 
-async function recordExport(siteId, segmentId, counterId, sessionCount, scoreThreshold) {
+async function recordExport(siteId, segmentId, counterId, sessionCount, scoreThreshold, segmentType = "hot_lookalike") {
   await pool.query(
     `INSERT INTO yandex_audiences_exports
-       (site_id, segment_id, counter_id, session_count, score_threshold)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [siteId, segmentId, counterId, sessionCount, scoreThreshold]
+       (site_id, segment_id, counter_id, session_count, score_threshold, segment_type)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [siteId, segmentId, counterId, sessionCount, scoreThreshold, segmentType]
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-async function run({ scoreThreshold = DEFAULT_SCORE_THRESHOLD, dryRun = false } = {}) {
-  getToken(); // fail fast if token missing
-
-  const sites = await fetchSites();
-  if (!sites.length) {
-    console.log("No sites with yandex_counter_id configured. Nothing to export.");
-    return;
-  }
-
-  console.log(`Exporting lookalike audiences for ${sites.length} site(s) — score threshold: ${scoreThreshold}`);
-
-  for (const site of sites) {
-    console.log(`\n[${site.domain}] counter=${site.yandex_counter_id}`);
-
-    const clientIds = await fetchHighIntentSessions(site.site_id, scoreThreshold);
-    console.log(`  High-intent unconverted sessions with metrica_client_id: ${clientIds.length}`);
-
-    if (clientIds.length < MIN_LOOKALIKE_COUNT) {
-      console.log(`  Skipping — need at least ${MIN_LOOKALIKE_COUNT} (have ${clientIds.length})`);
-      continue;
-    }
-
-    // Deduplicate (same visitor may have multiple sessions)
-    const uniqueIds = [...new Set(clientIds)];
-    console.log(`  Unique Metrica client IDs: ${uniqueIds.length}`);
-
-    const csv = uniqueIds.join("\n");
-    const segmentName = `SURFAI High Intent — ${site.domain}`;
-
-    // Delete previous segment for this site before creating the new one
-    const prevSegmentId = await fetchPreviousSegment(site.site_id);
-    if (prevSegmentId) {
-      console.log(`  Deleting previous segment: ${prevSegmentId}`);
-      await deleteSegment(prevSegmentId, dryRun);
-    }
-
-    // Upload and confirm
-    console.log(`  Uploading ${uniqueIds.length} client IDs…`);
-    const segmentId = await uploadCsv(csv, dryRun);
-    console.log(`  Upload accepted — temporary segment_id: ${segmentId}`);
-
-    await confirmSegment(segmentId, segmentName, site.yandex_counter_id, dryRun);
-    console.log(`  Confirmed segment "${segmentName}"`);
-
-    if (!dryRun) {
-      await recordExport(site.site_id, segmentId, site.yandex_counter_id, uniqueIds.length, scoreThreshold);
-    }
-
-    console.log(`  Done. Segment ${segmentId} ready for Yandex Direct retargeting.`);
-  }
+function buildAudiencesCsv(clientIds) {
+  const unique = [...new Set(clientIds.filter(Boolean))];
+  return unique.join("\n");
 }
 
 // ---------------------------------------------------------------------------
-// CLI
+// Export Engine
 // ---------------------------------------------------------------------------
 
-const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
-const scoreArg = args.find((a) => a.startsWith("--score=") || a === "--score");
-const scoreThreshold = scoreArg
-  ? parseFloat(args[args.indexOf(scoreArg) + (scoreArg.includes("=") ? 0 : 1)]?.replace("--score=", "") ?? DEFAULT_SCORE_THRESHOLD)
-  : DEFAULT_SCORE_THRESHOLD;
+async function exportSiteSegment({
+  site,
+  segmentType,
+  scoreThreshold,
+  dryRun = false,
+}) {
+  const isHot = segmentType === "hot_lookalike";
+  const label = isHot ? "Hot Leads Look-alike" : "Negative Bots & Junk";
+  const filename = isHot ? "hot_leads_lal.csv" : "negative_waste.csv";
+  const segmentName = isHot
+    ? `[SURFAI] Hot Leads LAL — ${site.domain} (Score >= ${scoreThreshold})`
+    : `[SURFAI] Minus Bots & Junk — ${site.domain} (-100% Bid)`;
 
-run({ scoreThreshold, dryRun })
-  .then(() => {
-    console.log("\nAudiences export complete.");
-    process.exit(0);
-  })
-  .catch((err) => {
-    console.error("Fatal error:", err.message);
-    process.exit(err.code === "TOKEN_MISSING" ? 2 : 1);
-  })
-  .finally(() => pool.end());
+  console.log(`  Checking [${label}]...`);
+
+  const rawIds = isHot
+    ? await fetchHighIntentSessions(site.site_id, scoreThreshold)
+    : await fetchNegativeWasteSessions(site.site_id);
+
+  const unique = [...new Set(rawIds.filter(Boolean))];
+  console.log(`    Found ${rawIds.length} sessions (${unique.length} unique client IDs)`);
+
+  if (unique.length < MIN_SEGMENT_COUNT && !dryRun) {
+    console.log(`    Skipping — need at least ${MIN_SEGMENT_COUNT} (have ${unique.length})`);
+    return { status: "skipped", reason: "below_minimum", count: unique.length, segmentType };
+  }
+
+  const csv = buildAudiencesCsv(unique);
+
+  // Delete previous segment of this specific type
+  const prevSegmentId = await fetchPreviousSegment(site.site_id, segmentType);
+  if (prevSegmentId) {
+    console.log(`    Deleting previous segment: ${prevSegmentId}`);
+    await deleteSegment(prevSegmentId, dryRun);
+  }
+
+  // Upload and confirm
+  console.log(`    Uploading ${unique.length} client IDs to Yandex Audiences…`);
+  const segmentId = await uploadCsv(csv, filename, dryRun);
+  console.log(`    Upload accepted — segment ID: ${segmentId}`);
+
+  await confirmSegment(segmentId, segmentName, site.yandex_counter_id, dryRun);
+  console.log(`    Confirmed segment "${segmentName}"`);
+
+  if (!dryRun) {
+    await recordExport(site.site_id, segmentId, site.yandex_counter_id, unique.length, isHot ? scoreThreshold : 0, segmentType);
+  }
+
+  return {
+    status: "exported",
+    segmentId,
+    segmentType,
+    segmentName,
+    count: unique.length,
+  };
+}
+
+async function run({
+  siteId = null,
+  type = "all",
+  scoreThreshold = DEFAULT_SCORE_THRESHOLD,
+  dryRun = false,
+} = {}) {
+  if (!dryRun) {
+    getToken(); // fail fast if token missing
+  }
+
+  const sites = await fetchSites(siteId);
+  if (!sites.length) {
+    console.log("No sites with yandex_counter_id configured. Nothing to export.");
+    return { results: [] };
+  }
+
+  const exportTypes = type === "hot" ? ["hot_lookalike"]
+    : type === "negative" ? ["negative_waste"]
+    : ["hot_lookalike", "negative_waste"];
+
+  console.log(`\n=== SURFAI Yandex Audiences Exporter ===`);
+  console.log(`Sites: ${sites.length}, Types: ${exportTypes.join(", ")}, Threshold: ${scoreThreshold}, DryRun: ${dryRun}`);
+
+  const results = [];
+
+  for (const site of sites) {
+    console.log(`\n[${site.domain}] counter=${site.yandex_counter_id}`);
+    for (const segmentType of exportTypes) {
+      try {
+        const res = await exportSiteSegment({ site, segmentType, scoreThreshold, dryRun });
+        results.push({ site: site.domain, site_id: site.site_id, ...res });
+      } catch (err) {
+        console.error(`    Error exporting ${segmentType} for ${site.domain}:`, err.message);
+        results.push({ site: site.domain, site_id: site.site_id, segmentType, status: "error", error: err.message });
+      }
+    }
+  }
+
+  return { results };
+}
+
+// ---------------------------------------------------------------------------
+// CLI Execution
+// ---------------------------------------------------------------------------
+
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  const dryRun = args.includes("--dry-run");
+
+  let type = "all";
+  const typeArg = args.find((a) => a.startsWith("--type="));
+  if (typeArg) type = typeArg.replace("--type=", "");
+
+  const scoreArg = args.find((a) => a.startsWith("--score=") || a === "--score");
+  const scoreThreshold = scoreArg
+    ? parseFloat(args[args.indexOf(scoreArg) + (scoreArg.includes("=") ? 0 : 1)]?.replace("--score=", "") ?? DEFAULT_SCORE_THRESHOLD)
+    : DEFAULT_SCORE_THRESHOLD;
+
+  run({ type, scoreThreshold, dryRun })
+    .then((res) => {
+      console.log("\nAudiences export complete:", JSON.stringify(res, null, 2));
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error("Fatal error:", err.message);
+      process.exit(err.code === "TOKEN_MISSING" ? 2 : 1);
+    })
+    .finally(() => pool.end());
+}
+
+module.exports = {
+  run,
+  fetchHighIntentSessions,
+  fetchNegativeWasteSessions,
+  buildAudiencesCsv,
+  DEFAULT_SCORE_THRESHOLD,
+  MIN_SEGMENT_COUNT,
+};

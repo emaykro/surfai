@@ -42,6 +42,34 @@ alwaysApply: false
 - `POST /api/conversions` — Server-side conversion registration (requires `sessionId` or `visitorId` + `goalId`).
 - Dashboard files are served from `dashboard/` under `/dashboard/` prefix via a second `@fastify/static` registration.
 
+## Ingest Queue & Graceful Shutdown
+
+`POST /api/events` replies first, then enqueues onto `IngestQueue`
+(`server/queue/ingest-queue.js`) rather than starting an unbounded promise.
+The worker runs `persistBatch → broadcastSSE → computeAndStore` per job with
+bounded concurrency.
+
+Buffered jobs live only in memory, so do not remove either of these:
+
+- The `SIGTERM`/`SIGINT` handlers in `server.js` that call `fastify.close()`.
+  Without them the `onClose` hook never runs and every buffered batch is
+  dropped on each `systemctl restart`.
+- The macrotask yield inside `flushAndDrain()`. Retrying `tick()` in a bare
+  loop schedules only microtasks, so the in-flight processor never completes
+  and shutdown hangs until `SIGKILL`.
+
+Shed batches (past `maxQueueSize`) are silent data loss — the SDK already got
+`{ok:true}` — so `/api/health` reports `ingest_queue: critical` when
+`dropped_total` moved since the previous poll.
+
+## Health Thresholds & Alerting
+
+Health-check thresholds are tuned for detection, not for quiet. Flapping is
+damped in the alerter (`ALERT_CONFIRM_TICKS`, default 2 consecutive polls at
+the same non-ok level), never by widening a threshold in `/api/health`.
+Recovery to `ok` is reported immediately. A check whose unset/misconfigured
+state reports `ok` hides the misconfiguration — use `warn`.
+
 ## Feature Engineering Pipeline
 
 - `server/features/extractors.js` — modular extractors for each event type (mouse, scroll, click, form, engagement, session, context, cross_session, bot_signals).

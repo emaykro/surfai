@@ -222,4 +222,28 @@ export interface TrackerOptions {
   dataLayerMappings?: DataLayerMapping[];
   /** Enable Yandex.Metrika reachGoal auto-capture. Default: false */
   metrikaCapture?: boolean;
+  /** On-site smart personalization & retention widget configuration */
+  personalization?: WidgetConfig;
 }
+
+export interface WidgetConfig {
+  enabled?: boolean;
+  title?: string;
+  subtitle?: string;
+  ctaText?: string;
+  ctaUrl?: string;
+  phone?: string;
+  badgeText?: string;
+  autoShowOnIntent?: boolean;
+  theme?: "dark" | "light" | "auto";
+}
+
+export interface IntentSignal {
+  level: "high" | "very_high";
+  scoreEstimate: number;
+  reasons: string[];
+  elapsedMs: number;
+}
+
+export type IntentCallback = (signal: IntentSignal) => void;
+

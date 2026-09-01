@@ -17,6 +17,7 @@ Thumbs.db
 # IDE / editor
 .vscode/
 .idea/
+.obsidian/
 
 # MCP server configs (contain local paths / credentials)
 .mcp.json

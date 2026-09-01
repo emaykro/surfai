@@ -88,6 +88,51 @@ function levelOf(check) {
   return check.level || (check.ok ? "ok" : "critical");
 }
 
+// A check must report the same non-ok level on this many consecutive polls
+// before it is believed. Recovery to "ok" is always accepted immediately —
+// good news never needs confirmation. This is what stops a check that
+// oscillates around its threshold (ingest_recent at night) from paging on
+// every crossing, without widening the threshold itself.
+const CONFIRM_TICKS = Math.max(parseInt(process.env.ALERT_CONFIRM_TICKS, 10) || 2, 1);
+
+function confirmLevels(prior, current) {
+  const priorEffective = prior?.effective || {};
+  const priorStreak = prior?.streak || {};
+  const effective = {};
+  const streak = {};
+
+  for (const [name, check] of Object.entries(current.checks || {})) {
+    const observed = levelOf(check);
+    const run = priorStreak[name];
+    const count = run && run.level === observed ? run.count + 1 : 1;
+    streak[name] = { level: observed, count };
+
+    // First time we see this check at all — take it at face value.
+    const settled = name in priorEffective ? priorEffective[name] : observed;
+    if (observed === settled || observed === "ok" || count >= CONFIRM_TICKS) {
+      effective[name] = observed;
+    } else {
+      effective[name] = settled;
+    }
+  }
+
+  return { effective, streak };
+}
+
+// Rebuild the health payload with confirmed levels, re-deriving the aggregate
+// status the same way /api/health does so the two never disagree.
+function applyLevels(current, effective) {
+  const checks = {};
+  for (const [name, check] of Object.entries(current.checks || {})) {
+    checks[name] = { ...check, level: effective[name] };
+  }
+  const levels = Object.values(effective);
+  let status = "healthy";
+  if (levels.includes("critical")) status = "unhealthy";
+  else if (levels.includes("warn")) status = "degraded";
+  return { status, checks };
+}
+
 function buildTransitionReport(prior, current) {
   // Returns an array of human-readable lines describing what changed,
   // or [] if nothing actionable changed.
@@ -177,34 +222,46 @@ async function main() {
     return;
   }
 
-  // --- Reachable: compute transitions -------------------------------------
+  // --- Reachable: confirm levels, then compute transitions ----------------
+  const { effective, streak } = confirmLevels(prior, current);
+  const confirmed = applyLevels(current, effective);
+
   const transitions = FORCE
-    ? ["*status*: (forced) " + current.status]
-    : buildTransitionReport(prior, current);
+    ? ["*status*: (forced) " + confirmed.status]
+    : buildTransitionReport(prior, confirmed);
 
   const state = {
-    status: current.status,
-    checks: current.checks,
+    status: confirmed.status,
+    checks: confirmed.checks,
+    effective,
+    streak,
     ts: Date.now(),
   };
   savePriorState(state);
 
   if (transitions.length === 0) {
-    console.log(`no change — status=${current.status}`);
+    console.log(
+      `no change — status=${confirmed.status}` +
+        (confirmed.status !== current.status ? ` (raw=${current.status}, awaiting confirmation)` : "")
+    );
     return;
   }
 
   const emoji =
-    current.status === "healthy" ? "✅" :
-    current.status === "degraded" ? "⚠️" : "🚨";
-  const header = `${emoji} *SURFAI ${current.status}*`;
+    confirmed.status === "healthy" ? "✅" :
+    confirmed.status === "degraded" ? "⚠️" : "🚨";
+  const header = `${emoji} *SURFAI ${confirmed.status}*`;
   const text = header + "\n" + transitions.join("\n");
 
   const result = await sendTelegram(text);
   console.log("alert sent:", result);
 }
 
-main().catch((err) => {
-  console.error("health-alert failed:", err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error("health-alert failed:", err);
+    process.exit(1);
+  });
+}
+
+module.exports = { confirmLevels, applyLevels, buildTransitionReport, levelOf };

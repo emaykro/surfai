@@ -60,6 +60,20 @@ describe("CRM Lead Dispatcher", () => {
     assert.equal(payload.traffic.utm_campaign, "b2b_enterprise");
     assert.equal(payload.traffic.site_domain, "surfai.ru");
   });
+
+  test("an unenriched company reaches the CRM without an invented legal status", () => {
+    // This payload leaves our system and lands in the customer's CRM. Every
+    // other unknown registry field goes out as null; status must not be the one
+    // that goes out asserting the company is active with the tax authority.
+    const payload = buildLeadPayload({
+      company: null,
+      session: { geo_asn_org: "Yandex LLC", model_prediction_score: 0.6 },
+      site: { domain: "luch-clean.ru" },
+    });
+
+    assert.equal(payload.company.inn, null);
+    assert.equal(payload.company.status, "UNKNOWN");
+  });
 });
 
 describe("CRM pending-session selection", () => {

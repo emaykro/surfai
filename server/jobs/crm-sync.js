@@ -42,7 +42,7 @@ function buildLeadPayload({ company, session, site }) {
       ogrn: company?.ogrn || null,
       address: company?.address || null,
       management_name: company?.management_name || null,
-      status: company?.status || "ACTIVE",
+      status: company?.status || "UNKNOWN",
     },
     intent: {
       score: score,

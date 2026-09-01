@@ -26,6 +26,51 @@ function getDaDataKey() {
   return process.env.DADATA_API_KEY || null;
 }
 
+// Hoisted so the conflict rules are reviewable on their own. `status` is guarded
+// like every other enriched field: a lookup that came back UNKNOWN must not
+// downgrade a status an earlier successful lookup already established.
+const UPSERT_COMPANY_SQL = `
+    INSERT INTO b2b_companies
+      (raw_org, clean_name, inn, kpp, ogrn, address, management_name, branch_type, status, raw_dadata, enriched_at, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+    ON CONFLICT (raw_org) DO UPDATE SET
+      clean_name = EXCLUDED.clean_name,
+      inn = COALESCE(EXCLUDED.inn, b2b_companies.inn),
+      kpp = COALESCE(EXCLUDED.kpp, b2b_companies.kpp),
+      ogrn = COALESCE(EXCLUDED.ogrn, b2b_companies.ogrn),
+      address = COALESCE(EXCLUDED.address, b2b_companies.address),
+      management_name = COALESCE(EXCLUDED.management_name, b2b_companies.management_name),
+      branch_type = COALESCE(EXCLUDED.branch_type, b2b_companies.branch_type),
+      status = CASE WHEN EXCLUDED.status = 'UNKNOWN' THEN b2b_companies.status ELSE EXCLUDED.status END,
+      raw_dadata = COALESCE(EXCLUDED.raw_dadata, b2b_companies.raw_dadata),
+      enriched_at = NOW(),
+      updated_at = NOW()
+    RETURNING *;
+  `;
+
+/**
+ * The record written for an org DaData did not resolve — no key, no answer, or
+ * no usable payload. Every registry field stays null and the legal status stays
+ * UNKNOWN: the dashboard renders `status` as "Статус ФНС", so anything else here
+ * is a claim about a real company that nobody verified.
+ * @param {string} rawOrg
+ * @returns {Object}
+ */
+function emptyCompanyRecord(rawOrg) {
+  return {
+    raw_org: rawOrg,
+    clean_name: cleanCompanyName(rawOrg),
+    inn: null,
+    kpp: null,
+    ogrn: null,
+    address: null,
+    management_name: null,
+    branch_type: null,
+    status: "UNKNOWN",
+    raw_dadata: null,
+  };
+}
+
 /**
  * Parse raw DaData response suggestion into a normalized company object.
  * @param {Object} suggestion
@@ -34,18 +79,7 @@ function getDaDataKey() {
  */
 function parseDaDataSuggestion(suggestion, rawOrg) {
   if (!suggestion || !suggestion.data) {
-    return {
-      raw_org: rawOrg,
-      clean_name: cleanCompanyName(rawOrg),
-      inn: null,
-      kpp: null,
-      ogrn: null,
-      address: null,
-      management_name: null,
-      branch_type: null,
-      status: "UNKNOWN",
-      raw_dadata: null,
-    };
+    return emptyCompanyRecord(rawOrg);
   }
 
   const d = suggestion.data;
@@ -58,7 +92,7 @@ function parseDaDataSuggestion(suggestion, rawOrg) {
     address: d.address?.value || null,
     management_name: d.management?.name || null,
     branch_type: d.branch_type || "MAIN",
-    status: d.state?.status || "ACTIVE",
+    status: d.state?.status || "UNKNOWN",
     raw_dadata: suggestion,
   };
 }
@@ -131,18 +165,7 @@ async function getOrEnrichCompany(rawOrg, forceRefresh = false) {
   const existing = rows[0] || null;
   const apiKey = getDaDataKey();
 
-  let enrichedData = {
-    raw_org: rawOrg,
-    clean_name: cleanName,
-    inn: null,
-    kpp: null,
-    ogrn: null,
-    address: null,
-    management_name: null,
-    branch_type: null,
-    status: "ACTIVE",
-    raw_dadata: null,
-  };
+  let enrichedData = emptyCompanyRecord(rawOrg);
 
   if (apiKey) {
     const suggestion = await queryDaDataParty(cleanName, apiKey);
@@ -151,26 +174,7 @@ async function getOrEnrichCompany(rawOrg, forceRefresh = false) {
     }
   }
 
-  const upsertQuery = `
-    INSERT INTO b2b_companies
-      (raw_org, clean_name, inn, kpp, ogrn, address, management_name, branch_type, status, raw_dadata, enriched_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
-    ON CONFLICT (raw_org) DO UPDATE SET
-      clean_name = EXCLUDED.clean_name,
-      inn = COALESCE(EXCLUDED.inn, b2b_companies.inn),
-      kpp = COALESCE(EXCLUDED.kpp, b2b_companies.kpp),
-      ogrn = COALESCE(EXCLUDED.ogrn, b2b_companies.ogrn),
-      address = COALESCE(EXCLUDED.address, b2b_companies.address),
-      management_name = COALESCE(EXCLUDED.management_name, b2b_companies.management_name),
-      branch_type = COALESCE(EXCLUDED.branch_type, b2b_companies.branch_type),
-      status = EXCLUDED.status,
-      raw_dadata = COALESCE(EXCLUDED.raw_dadata, b2b_companies.raw_dadata),
-      enriched_at = NOW(),
-      updated_at = NOW()
-    RETURNING *;
-  `;
-
-  const { rows: savedRows } = await pool.query(upsertQuery, [
+  const { rows: savedRows } = await pool.query(UPSERT_COMPANY_SQL, [
     enrichedData.raw_org,
     enrichedData.clean_name,
     enrichedData.inn,
@@ -188,6 +192,8 @@ async function getOrEnrichCompany(rawOrg, forceRefresh = false) {
 
 module.exports = {
   getOrEnrichCompany,
+  emptyCompanyRecord,
+  UPSERT_COMPANY_SQL,
   isRecentlyAttempted,
   ENRICH_RETRY_HOURS,
   queryDaDataParty,

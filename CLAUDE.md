@@ -249,6 +249,7 @@ Phases 1–6 complete. Bot detection layer deployed 2026-04-08. Telemetry reliab
 | 030 | `ad_optimization_ga4_audiences.sql` | `segment_type` on `yandex_audiences_exports` (`hot_lookalike` / `negative_waste`) + GA4 columns on `sites` and `ga4_conversions_exports`. |
 | 031 | `b2b_abm_and_crm.sql` | `b2b_companies` (enriched corporate accounts, `raw_org` UNIQUE) + `crm_integrations`. |
 | 032 | `partitioning_and_retention.sql` | `create_monthly_partition()` and `cleanup_old_raw_batches()` helper functions. **Definitions only — nothing calls them yet, so no partitioning or retention is actually in effect.** |
+| 033 | `b2b_status_unknown_default.sql` | `b2b_companies.status` default `'ACTIVE'` → `'UNKNOWN'` + one-off correction of rows written under the old default. An org DaData never resolved must not claim an active tax-registry standing — the value is rendered as "Статус ФНС" and shipped to the customer's CRM. |
 
 **Critical rule:** any new `events.type` value requires updating `events_type_check` in a migration in the SAME commit as the SDK change. Otherwise atomic `persistBatch` will reject every batch containing the new type. Learned from the 2026-04-08 incident — see `vault/bugs/2026-04-10 context and session event loss.md`.
 

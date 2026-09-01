@@ -534,7 +534,7 @@
         <div class="detail-row"><div class="detail-label">ОГРН:</div><div class="detail-val">${activeCompany.ogrn || '-'}</div></div>
         <div class="detail-row"><div class="detail-label">Адрес:</div><div class="detail-val">${escapeHtml(activeCompany.address || '-')}</div></div>
         <div class="detail-row"><div class="detail-label">Руководитель:</div><div class="detail-val">${escapeHtml(activeCompany.management_name || '-')}</div></div>
-        <div class="detail-row"><div class="detail-label">Статус ФНС:</div><div class="detail-val">${escapeHtml(activeCompany.legal_status || 'ACTIVE')}</div></div>
+        <div class="detail-row"><div class="detail-label">Статус ФНС:</div><div class="detail-val">${escapeHtml(activeCompany.legal_status || 'UNKNOWN')}</div></div>
         <div class="detail-row"><div class="detail-label">Локация:</div><div class="detail-val">${escapeHtml(activeCompany.location)}</div></div>
         <div class="detail-row"><div class="detail-label">Всего визитов:</div><div class="detail-val">${activeCompany.total_sessions} сессий (${activeCompany.active_days} активных дней)</div></div>
         <div class="detail-row"><div class="detail-label">Intent Score:</div><div class="detail-val">${Math.round(activeCompany.avg_intent_score * 100)}%</div></div>

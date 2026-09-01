@@ -72,10 +72,6 @@ const ingestQueue = new IngestQueue({
   logger: fastify.log,
 });
 
-// Previous value of ingestQueue's cumulative drop counter, sampled by
-// /api/health so it can tell active shedding from a stale total.
-let lastDroppedTotal = 0;
-
 // ---------------------------------------------------------------------------
 // CORS — explicit origins; never open `*` in production
 // ---------------------------------------------------------------------------
@@ -1767,8 +1763,14 @@ fastify.post("/api/b2b/companies/enrich", { preHandler: [requireOperatorAuth] },
 });
 
 fastify.get("/api/crm/integrations", { preHandler: [requireOperatorAuth] }, async (request) => {
+  // Never project api_token: it is a stored third-party credential, and this
+  // response reaches browsers, devtools and proxy logs. Mirrors the shape
+  // /api/ga4/status already uses for ga4_api_secret.
   const { rows } = await pool.query(
-    `SELECT ci.*, s.domain AS site_domain
+    `SELECT ci.id, ci.site_id, ci.project_id, ci.crm_type, ci.name,
+            ci.webhook_url, ci.settings, ci.enabled, ci.created_at,
+            (ci.api_token IS NOT NULL) AS has_api_token,
+            s.domain AS site_domain
      FROM crm_integrations ci
      LEFT JOIN sites s ON s.site_id = ci.site_id
      ORDER BY ci.created_at DESC`
@@ -1786,7 +1788,8 @@ fastify.post("/api/crm/integrations", { preHandler: [requireOperatorAuth] }, asy
     `INSERT INTO crm_integrations
        (site_id, crm_type, name, webhook_url, api_token, settings, enabled)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING *`,
+     RETURNING id, site_id, project_id, crm_type, name, webhook_url, settings,
+               enabled, created_at, (api_token IS NOT NULL) AS has_api_token`,
     [site_id || null, crm_type, name, webhook_url, api_token || null, JSON.stringify(settings || {}), enabled ?? true]
   );
 
@@ -2095,22 +2098,19 @@ fastify.get("/api/health", { preHandler: [requireOperatorAuth] }, async (_reques
 
   // --- Ingest queue high-load throughput metrics --------------------------
   // Shed batches are accepted-then-discarded: the SDK already got {ok:true},
-  // so silent data loss must not read as "ok". dropped_total is cumulative for
-  // the process lifetime, so compare against the previous poll — a counter that
-  // stopped moving is history, not an ongoing incident.
+  // so a rising dropped_total is silent data loss. This handler stays pure and
+  // reports the cumulative counter; the alerter diffs it against its own
+  // persisted state. Diffing here would mean whichever client polled first
+  // consumed the delta and hid the incident from everyone else.
   const queueStats = ingestQueue.getStats();
   const queueFill = queueStats.max_queue_size
     ? queueStats.queue_size / queueStats.max_queue_size
     : 0;
-  const droppedSinceLastPoll = queueStats.dropped_total - lastDroppedTotal;
-  lastDroppedTotal = queueStats.dropped_total;
-  const queueLevel =
-    droppedSinceLastPoll > 0 ? "critical" : queueFill >= 0.5 ? "warn" : "ok";
+  const queueLevel = queueFill >= 0.5 ? "warn" : "ok";
   checks.ingest_queue = {
     ok: queueLevel === "ok",
     level: queueLevel,
     fill_ratio: +queueFill.toFixed(3),
-    dropped_since_last_poll: droppedSinceLastPoll,
     ...queueStats,
   };
 

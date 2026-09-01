@@ -49,3 +49,38 @@ describe("GA4 Measurement Protocol Exporter", () => {
     assert.equal(DEFAULT_PREDICTED_THRESHOLD, 0.7);
   });
 });
+
+describe("GA4 payload honesty and event dating", () => {
+  const { buildGa4Payload, GA4_MAX_EVENT_AGE_HOURS } = require("../jobs/ga4-conversions");
+
+  test("omits value and currency when no lead value is configured", () => {
+    const p = buildGa4Payload({ clientId: "c1", eventName: "surfai_predicted_lead", score: 0.72 });
+    // A model probability is not revenue; sending it would steer value-based bidding.
+    assert.equal("value" in p.events[0].params, false);
+    assert.equal("currency" in p.events[0].params, false);
+    assert.equal(p.events[0].params.score, 0.72);
+  });
+
+  test("sends value with currency when one is explicitly supplied", () => {
+    const p = buildGa4Payload({ clientId: "c1", eventName: "e", score: 0.72, value: 1500 });
+    assert.equal(p.events[0].params.value, 1500);
+    assert.equal(p.events[0].params.currency, "RUB");
+  });
+
+  test("stamps the session's own time so a backfill is not dated today", () => {
+    const occurredAt = new Date(Date.now() - 6 * 3600_000);
+    const p = buildGa4Payload({ clientId: "c1", eventName: "e", occurredAt });
+    assert.equal(p.timestamp_micros, String(occurredAt.getTime() * 1000));
+  });
+
+  test("omits a timestamp GA4 would reject rather than sending a wrong one", () => {
+    const tooOld = new Date(Date.now() - (GA4_MAX_EVENT_AGE_HOURS + 5) * 3600_000);
+    const p = buildGa4Payload({ clientId: "c1", eventName: "e", occurredAt: tooOld });
+    assert.equal("timestamp_micros" in p, false);
+
+    const future = new Date(Date.now() + 3600_000);
+    assert.equal("timestamp_micros" in buildGa4Payload({ clientId: "c1", eventName: "e", occurredAt: future }), false);
+
+    assert.equal("timestamp_micros" in buildGa4Payload({ clientId: "c1", eventName: "e", occurredAt: "not-a-date" }), false);
+  });
+});

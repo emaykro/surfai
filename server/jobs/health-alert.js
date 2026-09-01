@@ -95,6 +95,25 @@ function levelOf(check) {
 // every crossing, without widening the threshold itself.
 const CONFIRM_TICKS = Math.max(parseInt(process.env.ALERT_CONFIRM_TICKS, 10) || 2, 1);
 
+/**
+ * Shed ingest batches, reported as a growth in the cumulative dropped_total.
+ *
+ * This is deliberately outside the confirmation machinery: shedding is never
+ * threshold noise — the SDK was already told {ok:true}, so every shed batch is
+ * data that no longer exists. Requiring two consecutive polls would miss the
+ * common case of a single burst, where the counter jumps once and then holds.
+ *
+ * @returns {string|null} a transition line, or null when nothing was shed.
+ */
+function droppedBatchLine(prior, current) {
+  const before = prior?.checks?.ingest_queue?.dropped_total;
+  const after = current?.checks?.ingest_queue?.dropped_total;
+  if (typeof after !== "number" || typeof before !== "number") return null;
+  if (after <= before) return null;
+  const shed = after - before;
+  return `  ingest\\_queue: *${shed} batch(es) shed* since last poll (total ${after})`;
+}
+
 function confirmLevels(prior, current) {
   const priorEffective = prior?.effective || {};
   const priorStreak = prior?.streak || {};
@@ -230,6 +249,9 @@ async function main() {
     ? ["*status*: (forced) " + confirmed.status]
     : buildTransitionReport(prior, confirmed);
 
+  const shedLine = FORCE ? null : droppedBatchLine(prior, current);
+  if (shedLine) transitions.push(shedLine);
+
   const state = {
     status: confirmed.status,
     checks: confirmed.checks,
@@ -264,4 +286,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { confirmLevels, applyLevels, buildTransitionReport, levelOf };
+module.exports = { confirmLevels, applyLevels, buildTransitionReport, levelOf, droppedBatchLine };

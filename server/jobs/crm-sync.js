@@ -16,6 +16,12 @@ const { pool } = require("../db.js");
 const { classifyAsnOrg, cleanCompanyName } = require("../features/b2b-detector.js");
 const { getOrEnrichCompany } = require("../features/b2b-enrichment.js");
 
+// Optional flat deal value per lead, in RUB. Unset means Bitrix24 receives
+// no OPPORTUNITY rather than a figure invented from the intent score.
+const LEAD_VALUE_RUB = process.env.CRM_LEAD_VALUE_RUB
+  ? Number(process.env.CRM_LEAD_VALUE_RUB)
+  : null;
+
 function formatLeadTitle(companyName, siteDomain, intentScore) {
   const scorePct = Math.round((intentScore || 0.5) * 100);
   return `[SURFAI Lead] ${companyName} (${scorePct}% интент) — ${siteDomain || "Сайт"}`;
@@ -106,10 +112,15 @@ async function sendToBitrix24(webhookUrl, payload, dryRun = false) {
         Город: ${payload.traffic.location}
       `.trim(),
       SOURCE_DESCRIPTION: "SURFAI B2B Intent Engine",
-      OPPORTUNITY: Math.round(payload.intent.score * 50000),
-      CURRENCY_ID: "RUB",
     },
   };
+
+  // A deal amount derived from a model probability is a number the sales team
+  // will forecast against. Only send one an operator deliberately configured.
+  if (LEAD_VALUE_RUB != null) {
+    bitrixBody.fields.OPPORTUNITY = LEAD_VALUE_RUB;
+    bitrixBody.fields.CURRENCY_ID = "RUB";
+  }
 
   const res = await fetch(url, {
     method: "POST",
@@ -137,27 +148,39 @@ async function dispatchLead(integration, leadData, dryRun = false) {
   return sendToWebhook(integration.webhook_url, leadData, dryRun);
 }
 
-async function syncPendingB2BLeads({ siteId = null, dryRun = false } = {}) {
-  // Fetch active CRM integrations
-  const params = [];
-  let where = "WHERE enabled = true";
+const DEFAULT_LOOKBACK_HOURS = Number(process.env.CRM_SYNC_LOOKBACK_HOURS || 48);
+const MAX_DISPATCH_ATTEMPTS = Number(process.env.CRM_SYNC_MAX_ATTEMPTS || 3);
+
+/**
+ * Candidate sessions for CRM dispatch.
+ *
+ * Two guards matter here and both are load-bearing:
+ *
+ *  - The lookback window. Without it the query reaches back over the entire
+ *    history, so enabling a CRM integration floods the customer's pipeline
+ *    with months-old visits presented as fresh leads.
+ *  - Retry semantics. A session is retired by a *successful* dispatch, not by
+ *    any dispatch: a transient webhook outage writes status='error' rows, and
+ *    those must not permanently suppress the lead. Attempts are capped at
+ *    maxAttempts so a permanently broken endpoint stops consuming the window.
+ *
+ * Known limitation: with several integrations matching one site, the first
+ * success retires the session for all of them. Single-integration setups —
+ * the current deployment — are unaffected.
+ */
+function buildPendingSessionsQuery({
+  siteId = null,
+  lookbackHours = DEFAULT_LOOKBACK_HOURS,
+  maxAttempts = MAX_DISPATCH_ATTEMPTS,
+} = {}) {
+  const params = [String(lookbackHours), maxAttempts];
+  let siteClause = "";
   if (siteId) {
     params.push(siteId);
-    where += " AND site_id = $1";
+    siteClause = `AND sf.site_id = $${params.length}`;
   }
 
-  const { rows: integrations } = await pool.query(
-    `SELECT * FROM crm_integrations ${where}`,
-    params
-  );
-
-  if (!integrations.length) {
-    console.log("No active CRM integrations configured.");
-    return { synced: 0, results: [] };
-  }
-
-  // Fetch recent high-intent B2B sessions (last 48 hours)
-  const sessionQuery = `
+  const text = `
     SELECT
       sf.session_id,
       sf.site_id,
@@ -179,7 +202,9 @@ async function syncPendingB2BLeads({ siteId = null, dryRun = false } = {}) {
       s.domain AS site_domain
     FROM session_features sf
     JOIN sites s ON s.site_id = sf.site_id
-    WHERE sf.geo_asn_org IS NOT NULL
+    WHERE sf.computed_at >= NOW() - ($1 || ' hours')::interval
+      AND sf.geo_asn_org IS NOT NULL
+      ${siteClause}
       AND (
         sf.model_prediction_score >= 0.45
         OR sf.copy_count > 0
@@ -187,13 +212,48 @@ async function syncPendingB2BLeads({ siteId = null, dryRun = false } = {}) {
       )
       AND NOT EXISTS (
         SELECT 1 FROM crm_synced_leads csl
-        WHERE csl.session_id = sf.session_id
+        WHERE csl.session_id = sf.session_id AND csl.status = 'success'
       )
+      AND (
+        SELECT COUNT(*) FROM crm_synced_leads csl2
+        WHERE csl2.session_id = sf.session_id AND csl2.status = 'error'
+      ) < $2
     ORDER BY sf.computed_at DESC
     LIMIT 50;
   `;
 
-  const { rows: sessions } = await pool.query(sessionQuery);
+  return { text, params };
+}
+
+async function syncPendingB2BLeads({
+  siteId = null,
+  dryRun = false,
+  lookbackHours = DEFAULT_LOOKBACK_HOURS,
+} = {}) {
+  // Fetch active CRM integrations
+  const params = [];
+  let where = "WHERE enabled = true";
+  if (siteId) {
+    params.push(siteId);
+    where += " AND site_id = $1";
+  }
+
+  const { rows: integrations } = await pool.query(
+    `SELECT * FROM crm_integrations ${where}`,
+    params
+  );
+
+  if (!integrations.length) {
+    console.log("No active CRM integrations configured.");
+    return { synced: 0, results: [] };
+  }
+
+  const { text: sessionQuery, params: sessionParams } = buildPendingSessionsQuery({
+    siteId,
+    lookbackHours,
+  });
+
+  const { rows: sessions } = await pool.query(sessionQuery, sessionParams);
 
   const b2bSessions = sessions.filter(
     (s) => classifyAsnOrg(s.geo_asn_org, s.geo_is_datacenter, s.geo_is_mobile_carrier) === "b2b_corporate"
@@ -290,6 +350,10 @@ if (require.main === module) {
 }
 
 module.exports = {
+  LEAD_VALUE_RUB,
+  buildPendingSessionsQuery,
+  DEFAULT_LOOKBACK_HOURS,
+  MAX_DISPATCH_ATTEMPTS,
   buildLeadPayload,
   formatLeadTitle,
   sendToWebhook,

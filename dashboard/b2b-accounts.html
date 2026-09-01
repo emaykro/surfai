@@ -490,7 +490,7 @@
               <div style="font-size:11px; color:var(--text-dim); margin-top:2px;">${escapeHtml(c.raw_org)}</div>
             </td>
             <td>
-              ${c.inn ? `<span class="tag tag-inn">ИНН: ${c.inn}</span>` : `<button class="btn-action" onclick="enrichInline('${escapeHtml(c.raw_org)}')">Обогатить</button>`}
+              ${c.inn ? `<span class="tag tag-inn">ИНН: ${c.inn}</span>` : `<button class="btn-action" onclick="enrichRow(${idx})">Обогатить</button>`}
             </td>
             <td>
               <div>${escapeHtml(c.location)}</div>
@@ -549,7 +549,17 @@
       activeCompany = null;
     }
 
+    // Row buttons pass the index rather than the org name: interpolating a
+    // value into a quoted JS string inside an onclick attribute breaks on any
+    // apostrophe ("O'Brien Telecom") and is an injection surface besides.
+    function enrichRow(idx) {
+      const row = currentFiltered[idx];
+      if (!row || !row.raw_org) return;
+      return enrichInline(row.raw_org);
+    }
+
     async function enrichInline(rawOrg) {
+      if (!rawOrg) return;
       try {
         const res = await apiFetch('/api/b2b/companies/enrich', {
           method: 'POST',
@@ -613,7 +623,12 @@
 
     function escapeHtml(s) {
       if (!s) return '';
-      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
     loadSites();

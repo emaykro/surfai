@@ -3,7 +3,12 @@
 const { test, describe } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { confirmLevels, applyLevels, buildTransitionReport } = require("../jobs/health-alert");
+const {
+  confirmLevels,
+  applyLevels,
+  buildTransitionReport,
+  droppedBatchLine,
+} = require("../jobs/health-alert");
 
 // Helper: run one alerter tick against a prior state and return what the
 // alerter would persist plus the lines it would have sent.
@@ -88,5 +93,31 @@ describe("health alerter level confirmation", () => {
     const recovered = tick(s, { ml_scoring_recent: OK });
     assert.equal(recovered.alerted, true);
     assert.equal(recovered.state.status, "healthy");
+  });
+});
+
+describe("shed ingest batches", () => {
+  const at = (n) => ({ checks: { ingest_queue: { level: "ok", dropped_total: n } } });
+
+  test("reports a single burst without waiting for confirmation", () => {
+    // A burst bumps the counter once and then holds; requiring two consecutive
+    // polls would never fire, and every shed batch is data already lost.
+    const line = droppedBatchLine(at(0), at(37));
+    assert.ok(line);
+    assert.match(line, /37 batch\(es\) shed/);
+    assert.match(line, /total 37/);
+  });
+
+  test("stays silent while the counter is not moving", () => {
+    assert.equal(droppedBatchLine(at(37), at(37)), null);
+  });
+
+  test("does not fire on a counter reset after a process restart", () => {
+    assert.equal(droppedBatchLine(at(37), at(0)), null);
+  });
+
+  test("stays silent on the first poll, with no prior counter to diff", () => {
+    assert.equal(droppedBatchLine(null, at(5)), null);
+    assert.equal(droppedBatchLine({ checks: {} }, at(5)), null);
   });
 });

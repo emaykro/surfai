@@ -12,6 +12,16 @@ const { cleanCompanyName } = require("./b2b-detector.js");
 
 const DADATA_SUGGEST_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/party";
 
+// How long an unresolved lookup is trusted before DaData is asked again.
+const ENRICH_RETRY_HOURS = Number(process.env.B2B_ENRICH_RETRY_HOURS || 168);
+
+function isRecentlyAttempted(enrichedAt) {
+  if (!enrichedAt) return false;
+  const ts = new Date(enrichedAt).getTime();
+  if (!Number.isFinite(ts)) return false;
+  return Date.now() - ts < ENRICH_RETRY_HOURS * 3600_000;
+}
+
 function getDaDataKey() {
   return process.env.DADATA_API_KEY || null;
 }
@@ -100,14 +110,22 @@ async function getOrEnrichCompany(rawOrg, forceRefresh = false) {
 
   const cleanName = cleanCompanyName(rawOrg);
 
-  // Check DB cache first
+  // Check DB cache first.
+  //
+  // The cache must remember the *attempt*, not just the success. Keying only on
+  // a non-null INN means every org DaData cannot resolve is looked up again on
+  // every call — and crm-sync calls this once per candidate session, so a run
+  // burns the daily quota re-asking the same unanswerable names. Unresolved
+  // rows are therefore held for ENRICH_RETRY_HOURS before being retried.
   const { rows } = await pool.query(
     `SELECT * FROM b2b_companies WHERE raw_org = $1`,
     [rawOrg]
   );
 
-  if (rows.length > 0 && !forceRefresh && rows[0].inn) {
-    return rows[0];
+  if (rows.length > 0 && !forceRefresh) {
+    const cached = rows[0];
+    if (cached.inn) return cached;
+    if (isRecentlyAttempted(cached.enriched_at)) return cached;
   }
 
   const existing = rows[0] || null;
@@ -170,6 +188,8 @@ async function getOrEnrichCompany(rawOrg, forceRefresh = false) {
 
 module.exports = {
   getOrEnrichCompany,
+  isRecentlyAttempted,
+  ENRICH_RETRY_HOURS,
   queryDaDataParty,
   parseDaDataSuggestion,
   cleanCompanyName,

@@ -25,12 +25,28 @@ const { pool } = require("../db.js");
 const GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 const GA4_DEBUG_ENDPOINT = "https://www.google-analytics.com/debug/mp/collect";
 const DEFAULT_PREDICTED_THRESHOLD = Number(process.env.GA4_PREDICTED_THRESHOLD || 0.7);
+// GA4 Measurement Protocol rejects events stamped more than 72 hours in the
+// past, so there is no point selecting sessions we cannot honestly date.
+const GA4_MAX_EVENT_AGE_HOURS = 72;
+// Optional flat value per predicted lead, in RUB. Unset means no `value` is
+// sent at all — preferable to inventing one from the model score.
+const LEAD_VALUE_RUB = process.env.GA4_LEAD_VALUE_RUB
+  ? Number(process.env.GA4_LEAD_VALUE_RUB)
+  : undefined;
+const DEFAULT_LOOKBACK_HOURS = Math.min(
+  Number(process.env.GA4_LOOKBACK_HOURS || GA4_MAX_EVENT_AGE_HOURS),
+  GA4_MAX_EVENT_AGE_HOURS
+);
 
-function buildGa4Payload({ clientId, eventName, score, value, currency = "RUB", engagementTimeMs, customParams = {} }) {
+function buildGa4Payload({ clientId, eventName, score, value, currency = "RUB", engagementTimeMs, occurredAt, customParams = {} }) {
   const params = {
     score: score != null ? Number(score) : undefined,
+    // `value` is real money to GA4: value-based bidding will optimise spend
+    // against it. A model probability is not a monetary amount, so nothing is
+    // reported unless an operator sets a deliberate per-lead value. currency
+    // only travels with an actual value.
     value: value != null ? Number(value) : undefined,
-    currency: currency,
+    currency: value != null ? currency : undefined,
     engagement_time_msec: engagementTimeMs ? Math.round(engagementTimeMs) : 1000,
     ...customParams,
   };
@@ -40,7 +56,7 @@ function buildGa4Payload({ clientId, eventName, score, value, currency = "RUB", 
     if (params[k] === undefined) delete params[k];
   }
 
-  return {
+  const body = {
     client_id: String(clientId || "anonymous_visitor"),
     non_personalized_ads: false,
     events: [
@@ -50,6 +66,19 @@ function buildGa4Payload({ clientId, eventName, score, value, currency = "RUB", 
       },
     ],
   };
+
+  // Without an explicit timestamp GA4 dates the event at receipt, so a
+  // backfill lands as a spike of conversions that happened today. Stamp the
+  // session's own time whenever it is inside GA4's accepted window.
+  if (occurredAt) {
+    const ms = occurredAt instanceof Date ? occurredAt.getTime() : new Date(occurredAt).getTime();
+    const ageMs = Date.now() - ms;
+    if (Number.isFinite(ms) && ageMs >= 0 && ageMs < GA4_MAX_EVENT_AGE_HOURS * 3600_000) {
+      body.timestamp_micros = String(ms * 1000);
+    }
+  }
+
+  return body;
 }
 
 async function sendGa4Event({ measurementId, apiSecret, payload, dryRun = false, debug = false }) {
@@ -98,12 +127,13 @@ async function fetchGa4Sites(siteId = null) {
   return rows;
 }
 
-async function fetchPendingPredictedLeads(siteId, scoreThreshold) {
+async function fetchPendingPredictedLeads(siteId, scoreThreshold, lookbackHours = DEFAULT_LOOKBACK_HOURS) {
   const query = `
     SELECT
       sf.session_id,
       sf.site_id,
       sf.visitor_id,
+      sf.computed_at,
       sf.model_prediction_score::float AS score,
       sf.session_duration_ms,
       sf.ctx_utm_source,
@@ -113,6 +143,7 @@ async function fetchPendingPredictedLeads(siteId, scoreThreshold) {
       sf.geo_country
     FROM session_features sf
     WHERE sf.site_id = $1
+      AND sf.computed_at >= NOW() - ($3 || ' hours')::interval
       AND sf.model_prediction_score >= $2
       AND (sf.is_bot IS NULL OR sf.is_bot = false)
       AND (sf.geo_is_datacenter IS NULL OR sf.geo_is_datacenter = false)
@@ -126,7 +157,7 @@ async function fetchPendingPredictedLeads(siteId, scoreThreshold) {
     ORDER BY sf.computed_at DESC
     LIMIT 200;
   `;
-  const { rows } = await pool.query(query, [siteId, scoreThreshold]);
+  const { rows } = await pool.query(query, [siteId, scoreThreshold, String(lookbackHours)]);
   return rows;
 }
 
@@ -172,8 +203,9 @@ async function run({
         clientId,
         eventName: "surfai_predicted_lead",
         score: lead.score,
-        value: Math.round(lead.score * 1000), // Estimated relative lead value in RUB
+        value: LEAD_VALUE_RUB,
         engagementTimeMs: lead.session_duration_ms,
+        occurredAt: lead.computed_at,
         customParams: {
           traffic_source: lead.ctx_utm_source || "unknown",
           traffic_medium: lead.ctx_utm_medium || "unknown",
@@ -191,7 +223,10 @@ async function run({
           debug,
         });
 
-        if (!dryRun) {
+        // The debug endpoint validates payloads and ingests nothing, so a
+        // debug run must not mark the session as exported — the unique index
+        // on (session_id, event_name) would then hide it from every real run.
+        if (!dryRun && !debug) {
           await recordGa4Export(
             site.site_id,
             lead.session_id,
@@ -202,8 +237,10 @@ async function run({
           );
         }
 
-        siteSynced++;
-        totalSynced++;
+        if (!debug) {
+          siteSynced++;
+          totalSynced++;
+        }
       } catch (err) {
         console.error(`  Error sending session ${lead.session_id} to GA4:`, err.message);
       }
@@ -252,4 +289,7 @@ module.exports = {
   sendGa4Event,
   fetchPendingPredictedLeads,
   DEFAULT_PREDICTED_THRESHOLD,
+  DEFAULT_LOOKBACK_HOURS,
+  GA4_MAX_EVENT_AGE_HOURS,
+  LEAD_VALUE_RUB,
 };

@@ -2,7 +2,11 @@
 
 const { test, describe } = require("node:test");
 const assert = require("node:assert/strict");
-const { buildLeadPayload, formatLeadTitle } = require("../jobs/crm-sync");
+const {
+  buildLeadPayload,
+  formatLeadTitle,
+  buildPendingSessionsQuery,
+} = require("../jobs/crm-sync");
 
 describe("CRM Lead Dispatcher", () => {
   test("formatLeadTitle creates human-readable title with score", () => {
@@ -55,5 +59,32 @@ describe("CRM Lead Dispatcher", () => {
     assert.equal(payload.traffic.utm_source, "yandex");
     assert.equal(payload.traffic.utm_campaign, "b2b_enterprise");
     assert.equal(payload.traffic.site_domain, "surfai.ru");
+  });
+});
+
+describe("CRM pending-session selection", () => {
+  test("bounds the candidate window instead of scanning all history", () => {
+    const { text, params } = buildPendingSessionsQuery({ lookbackHours: 48 });
+    assert.match(text, /sf\.computed_at >= NOW\(\) - \(\$1 \|\| ' hours'\)::interval/);
+    assert.equal(params[0], "48");
+  });
+
+  test("retires a session on success but keeps retrying after an error", () => {
+    const { text, params } = buildPendingSessionsQuery({ maxAttempts: 3 });
+    // Only a successful dispatch may suppress the lead...
+    assert.match(text, /NOT EXISTS[\s\S]*csl\.status = 'success'/);
+    // ...and error rows are bounded, not terminal.
+    assert.match(text, /csl2\.status = 'error'[\s\S]*\) < \$2/);
+    assert.equal(params[1], 3);
+  });
+
+  test("scopes candidates to the requested site", () => {
+    const scoped = buildPendingSessionsQuery({ siteId: "site_abc" });
+    assert.match(scoped.text, /AND sf\.site_id = \$3/);
+    assert.equal(scoped.params[2], "site_abc");
+
+    const unscoped = buildPendingSessionsQuery({});
+    assert.ok(!unscoped.text.includes("sf.site_id = $"));
+    assert.equal(unscoped.params.length, 2);
   });
 });

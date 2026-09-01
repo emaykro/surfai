@@ -19,8 +19,11 @@
  *   node server/jobs/hot-lead-alert.js --lookback=60
  *
  * Env vars:
- *   TELEGRAM_BOT_TOKEN          required — bot token from @BotFather
- *   TELEGRAM_ALERT_CHAT_ID      required — destination chat ID
+ *   HOT_LEAD_BOT_TOKEN          required — lead-channel bot token
+ *                               (falls back to CONTACT_BOT_TOKEN / @Surfaiask_bot)
+ *   HOT_LEAD_CHAT_ID            required — destination chat ID for leads.
+ *                               Never falls back to TELEGRAM_ALERT_CHAT_ID: the
+ *                               ops channel is for infrastructure, not sales.
  *   HOT_LEAD_THRESHOLD          default 0.75
  *   DASHBOARD_BASE_URL          default https://surfai.ru/dashboard
  */
@@ -29,8 +32,14 @@ require("dotenv").config({ path: require("path").resolve(__dirname, "../../.env"
 
 const { pool } = require("../db");
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const CHAT_ID = process.env.TELEGRAM_ALERT_CHAT_ID;
+// Leads and infrastructure alerts ride separate Telegram channels on purpose:
+// a lead needs a human within minutes, and interleaving it with health noise
+// is how leads get missed. TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID belong
+// to @SurfaiOps_bot and are deliberately NOT used here — there is no fallback
+// onto the ops channel, because silent misrouting is the failure we are
+// avoiding. Configure HOT_LEAD_CHAT_ID explicitly.
+const TOKEN = process.env.HOT_LEAD_BOT_TOKEN || process.env.CONTACT_BOT_TOKEN;
+const CHAT_ID = process.env.HOT_LEAD_CHAT_ID;
 const DEFAULT_THRESHOLD = Number(process.env.HOT_LEAD_THRESHOLD || 0.75);
 const DASHBOARD_BASE_URL = process.env.DASHBOARD_BASE_URL || "https://surfai.ru/dashboard";
 
@@ -65,7 +74,10 @@ function formatDuration(ms) {
 
 async function sendTelegram(text) {
   if (!TOKEN || !CHAT_ID) {
-    throw new Error("TELEGRAM_BOT_TOKEN or TELEGRAM_ALERT_CHAT_ID is missing");
+    throw new Error(
+      "Hot-lead channel is not configured: set HOT_LEAD_BOT_TOKEN (or CONTACT_BOT_TOKEN) " +
+        "and HOT_LEAD_CHAT_ID. The ops channel is not used as a fallback by design."
+    );
   }
   const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
     method: "POST",
@@ -207,7 +219,10 @@ async function run() {
             s.session_id,
             s.site_id,
             s.project_id,
-            s.score || 0.75,
+            // NULL when the model never scored this session. Substituting a
+            // number here makes a behavioural trigger indistinguishable from a
+            // real prediction in any later precision analysis.
+            s.score ?? null,
             reason,
             JSON.stringify({
               duration_ms: s.session_duration_ms,

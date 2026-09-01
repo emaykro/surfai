@@ -420,18 +420,24 @@
       let totalBots = 0;
       let wasteCount = 0;
 
+      // avg_intent_score is null for cohorts without enough scored sessions.
+      // Average over the scored ones only, rather than counting "unknown" as 0.
+      let scoredSessions = 0;
       for (const it of items) {
         totalSessions += it.sessions_count;
-        weightedIntent += (it.avg_intent_score * it.sessions_count);
+        if (it.has_intent_signal && it.avg_intent_score != null) {
+          weightedIntent += (it.avg_intent_score * it.sessions_count);
+          scoredSessions += it.sessions_count;
+        }
         totalBots += it.bot_count;
         if (it.status === 'waste') wasteCount++;
       }
 
-      const avgTQI = totalSessions > 0 ? Math.round((weightedIntent / totalSessions) * 100) : 0;
+      const avgTQI = scoredSessions > 0 ? Math.round((weightedIntent / scoredSessions) * 100) : null;
       const botPct = totalSessions > 0 ? Math.round((totalBots / totalSessions) * 100) : 0;
 
       document.getElementById('kpi-total-sessions').textContent = totalSessions.toLocaleString();
-      document.getElementById('kpi-avg-intent').textContent = `${avgTQI}%`;
+      document.getElementById('kpi-avg-intent').textContent = avgTQI === null ? 'н/д' : `${avgTQI}%`;
       document.getElementById('kpi-bot-ratio').textContent = `${botPct}%`;
       document.getElementById('kpi-bot-sub').textContent = `${totalBots.toLocaleString()} нецелевых сессий`;
       document.getElementById('kpi-waste-count').textContent = wasteCount;
@@ -445,10 +451,14 @@
       }
 
       tbody.innerHTML = items.map(r => {
-        const intentPct = Math.round(r.avg_intent_score * 100);
-        let intentColor = 'var(--red)';
-        if (intentPct >= 40) intentColor = 'var(--green)';
-        else if (intentPct >= 20) intentColor = 'var(--amber)';
+        const hasIntent = r.has_intent_signal && r.avg_intent_score != null;
+        const intentPct = hasIntent ? Math.round(r.avg_intent_score * 100) : 0;
+        let intentColor = 'var(--text-dim)';
+        if (hasIntent) {
+          intentColor = 'var(--red)';
+          if (intentPct >= 40) intentColor = 'var(--green)';
+          else if (intentPct >= 20) intentColor = 'var(--amber)';
+        }
 
         const botPct = Math.round(r.bot_ratio * 100);
         const crPct = (r.conversion_rate * 100).toFixed(1);
@@ -565,7 +575,12 @@
 
     function escapeHtml(s) {
       if (!s) return '';
-      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
     loadSites();

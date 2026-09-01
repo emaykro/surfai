@@ -32,6 +32,9 @@ const { pool } = require("../db.js");
 const AUDIENCES_BASE = "https://api-audience.yandex.ru/v1/management";
 const MIN_SEGMENT_COUNT = 100;
 const DEFAULT_SCORE_THRESHOLD = 0.7;
+// Negative targeting is a lasting exclusion, so it is scoped to a recent
+// window rather than the whole history.
+const NEGATIVE_LOOKBACK_DAYS = Number(process.env.AUDIENCES_NEGATIVE_LOOKBACK_DAYS || 90);
 
 function getToken() {
   const t = process.env.YANDEX_AUDIENCES_TOKEN;
@@ -158,26 +161,33 @@ async function fetchHighIntentSessions(siteId, scoreThreshold = DEFAULT_SCORE_TH
 /**
  * Negative / waste sessions (bots, datacenters, micro-bounces) for negative targeting (-100% bid adjustment).
  */
-async function fetchNegativeWasteSessions(siteId) {
+async function fetchNegativeWasteSessions(siteId, lookbackDays = NEGATIVE_LOOKBACK_DAYS) {
   const { rows } = await pool.query(
     `SELECT sf.metrica_client_id
      FROM session_features sf
      WHERE sf.site_id = $1
+       AND sf.computed_at >= NOW() - ($2 || ' days')::interval
        AND sf.metrica_client_id IS NOT NULL
        AND (
          sf.is_bot = true
          OR sf.geo_is_datacenter = true
          OR sf.bot_risk_level = 'high'
          OR (
-           COALESCE(sf.session_duration_ms, 0) < 3000
-           AND COALESCE(sf.click_count, 0) = 0
-           AND COALESCE(sf.scroll_max_depth, 0) = 0
+           -- Micro-bounce requires *measured* inactivity, never absent
+           -- telemetry. COALESCE-ing NULL to 0 here would classify sessions
+           -- whose engagement events simply never arrived (blocked tag, the
+           -- passive-only event mix of the 2026-04-10 incident) as waste, and
+           -- metrica_client_id identifies a device rather than a session — so
+           -- a real prospect would be excluded from advertising for good.
+           sf.session_duration_ms IS NOT NULL AND sf.session_duration_ms < 3000
+           AND sf.click_total IS NOT NULL AND sf.click_total = 0
+           AND sf.scroll_max_depth IS NOT NULL AND sf.scroll_max_depth = 0
          )
        )
        AND NOT EXISTS (
          SELECT 1 FROM conversions c WHERE c.session_id = sf.session_id
        )`,
-    [siteId]
+    [siteId, String(lookbackDays)]
   );
   return rows.map((r) => r.metrica_client_id);
 }
@@ -240,20 +250,30 @@ async function exportSiteSegment({
 
   const csv = buildAudiencesCsv(unique);
 
-  // Delete previous segment of this specific type
+  // Upload and confirm the replacement BEFORE retiring the old segment.
+  // Deleting first leaves the Direct campaign with no audience whenever the
+  // upload fails (expired token, API 5xx): hot_lookalike retargeting stops
+  // serving, and the negative_waste segment that applies a -100% bid
+  // adjustment disappears, so spend resumes on known bot traffic.
   const prevSegmentId = await fetchPreviousSegment(site.site_id, segmentType);
-  if (prevSegmentId) {
-    console.log(`    Deleting previous segment: ${prevSegmentId}`);
-    await deleteSegment(prevSegmentId, dryRun);
-  }
 
-  // Upload and confirm
   console.log(`    Uploading ${unique.length} client IDs to Yandex Audiences…`);
   const segmentId = await uploadCsv(csv, filename, dryRun);
   console.log(`    Upload accepted — segment ID: ${segmentId}`);
 
   await confirmSegment(segmentId, segmentName, site.yandex_counter_id, dryRun);
   console.log(`    Confirmed segment "${segmentName}"`);
+
+  // Only now is the old segment redundant. A failure here is not fatal — it
+  // leaves a stale extra segment, which is recoverable, unlike an empty one.
+  if (prevSegmentId) {
+    console.log(`    Retiring previous segment: ${prevSegmentId}`);
+    try {
+      await deleteSegment(prevSegmentId, dryRun);
+    } catch (err) {
+      console.warn(`    Could not delete previous segment ${prevSegmentId}: ${err.message}`);
+    }
+  }
 
   if (!dryRun) {
     await recordExport(site.site_id, segmentId, site.yandex_counter_id, unique.length, isHot ? scoreThreshold : 0, segmentType);
@@ -345,4 +365,5 @@ module.exports = {
   buildAudiencesCsv,
   DEFAULT_SCORE_THRESHOLD,
   MIN_SEGMENT_COUNT,
+  NEGATIVE_LOOKBACK_DAYS,
 };

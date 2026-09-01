@@ -19,6 +19,10 @@ require("dotenv").config({ path: require("path").resolve(__dirname, "../../.env"
 
 const { pool } = require("../db");
 
+// Minimum share of a cohort that must carry a model score before the intent
+// term is allowed to influence the waste verdict.
+const MIN_SCORED_RATIO = Number(process.env.TRAFFIC_AUDIT_MIN_SCORED_RATIO || 0.5);
+
 function parseArgs(argv) {
   const args = { days: 30, dimension: "campaign", dryRun: false, siteId: null };
   for (const a of argv.slice(2)) {
@@ -69,7 +73,8 @@ async function analyzeTrafficQuality({ days = 30, dimension = "campaign", siteId
     SELECT
       ${dimCol} AS dimension_name,
       COUNT(*)::int AS sessions_count,
-      ROUND(AVG(COALESCE(sf.model_prediction_score, 0.1))::numeric, 4)::float AS avg_intent_score,
+      ROUND(AVG(sf.model_prediction_score)::numeric, 4)::float AS avg_intent_score,
+      COUNT(*) FILTER (WHERE sf.model_prediction_score IS NOT NULL)::int AS scored_count,
       COUNT(*) FILTER (WHERE sf.converted = true)::int AS conversions_count,
       ROUND(AVG(COALESCE(sf.session_duration_ms, 0) / 1000.0)::numeric, 1)::float AS avg_duration_sec,
       ROUND(AVG(COALESCE(sf.scroll_max_depth, 0))::numeric, 1)::float AS avg_scroll_depth,
@@ -91,22 +96,37 @@ async function analyzeTrafficQuality({ days = 30, dimension = "campaign", siteId
   const enriched = rows.map((r) => {
     const convRate = r.sessions_count > 0 ? (r.conversions_count / r.sessions_count) : 0;
     const botRatio = r.sessions_count > 0 ? (r.bot_count / r.sessions_count) : 0;
-    
-    // Waste index (0..100): high bot ratio, low duration, zero intent score
+    const scoredRatio = r.sessions_count > 0 ? (r.scored_count / r.sessions_count) : 0;
+
+    // The intent term may only be used when enough of the cohort actually
+    // carries a model score. Substituting a low default for NULL would make
+    // an unscored cohort — e.g. any period when the ML scoring timer is down —
+    // look like waste, and the output of this function is a recommendation to
+    // switch off ad spend. When the signal is missing, its weight is
+    // redistributed over the terms we do trust rather than assumed bad.
+    const hasIntentSignal = r.avg_intent_score != null && scoredRatio >= MIN_SCORED_RATIO;
+
     const durationPenalty = Math.max(0, 1 - (r.avg_duration_sec / 30));
-    const intentPenalty = Math.max(0, 1 - (r.avg_intent_score / 0.5));
-    const wasteScore = Math.min(100, Math.round((botRatio * 40 + durationPenalty * 30 + intentPenalty * 30)));
+    const intentPenalty = hasIntentSignal ? Math.max(0, 1 - (r.avg_intent_score / 0.5)) : 0;
+
+    const wasteScore = hasIntentSignal
+      ? Math.min(100, Math.round(botRatio * 40 + durationPenalty * 30 + intentPenalty * 30))
+      : Math.min(100, Math.round((botRatio * 40 + durationPenalty * 30) * (100 / 70)));
 
     let status = "ok";
     let recommendation = "Эффективный источник";
 
-    if (r.sessions_count >= 10 && wasteScore >= 65 && r.conversions_count === 0) {
+    if (!hasIntentSignal && r.conversions_count === 0 && botRatio < 0.5) {
+      // Not enough evidence to advise switching anything off.
+      status = "insufficient_data";
+      recommendation = `ℹ️ Недостаточно данных: проскорено ${Math.round(scoredRatio * 100)}% сессий — проверьте ML-скоринг`;
+    } else if (r.sessions_count >= 10 && wasteScore >= 65 && r.conversions_count === 0) {
       status = "waste";
       recommendation = "⛔️ Рекомендуется отключить / добавить в минус-список";
     } else if (wasteScore >= 45 && r.conversions_count === 0) {
       status = "warning";
       recommendation = "⚠️ Требует аудита креативов и посадочной страницы";
-    } else if (r.avg_intent_score >= 0.4 || r.conversions_count > 0) {
+    } else if ((hasIntentSignal && r.avg_intent_score >= 0.4) || r.conversions_count > 0) {
       status = "high_performing";
       recommendation = "💎 Высокая конверсионная ценность (масштабировать)";
     }
@@ -115,6 +135,8 @@ async function analyzeTrafficQuality({ days = 30, dimension = "campaign", siteId
       ...r,
       conversion_rate: Number(convRate.toFixed(4)),
       bot_ratio: Number(botRatio.toFixed(4)),
+      scored_ratio: Number(scoredRatio.toFixed(4)),
+      has_intent_signal: hasIntentSignal,
       waste_score: wasteScore,
       status,
       recommendation,
@@ -140,7 +162,7 @@ async function run() {
       results.map((r) => ({
         "Dimension": r.dimension_name.slice(0, 30),
         "Sessions": r.sessions_count,
-        "Avg Intent": `${Math.round(r.avg_intent_score * 100)}%`,
+        "Avg Intent": r.has_intent_signal ? `${Math.round(r.avg_intent_score * 100)}%` : "н/д",
         "Conv": r.conversions_count,
         "Avg Sec": r.avg_duration_sec,
         "Bot %": `${Math.round(r.bot_ratio * 100)}%`,
@@ -153,7 +175,7 @@ async function run() {
     if (wasteItems.length > 0) {
       console.log("\n🚨 КАНДИДАТЫ НА ВЫКЛЮЧЕНИЕ / МИНУСАЦИЮ:");
       for (const w of wasteItems) {
-        console.log(`  • ${w.dimension_name} (${w.sessions_count} кликов, ${Math.round(w.bot_ratio * 100)}% ботов, Intent: ${Math.round(w.avg_intent_score * 100)}%)`);
+        console.log(`  • ${w.dimension_name} (${w.sessions_count} кликов, ${Math.round(w.bot_ratio * 100)}% ботов, Intent: ${w.has_intent_signal ? Math.round(w.avg_intent_score * 100) + "%" : "н/д"})`);
       }
     }
   } catch (err) {
@@ -166,4 +188,4 @@ if (require.main === module) {
   run().then(() => process.exit(0));
 }
 
-module.exports = { analyzeTrafficQuality, getDimensionColumn };
+module.exports = { analyzeTrafficQuality, getDimensionColumn, MIN_SCORED_RATIO };

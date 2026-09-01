@@ -535,3 +535,13 @@ Starting 2026-04-10, the ingest path looks up the client IP against local MMDB f
 | `INGEST_SILENCE_WARN_SEC` | `900` | Age of the newest batch (seconds) at which `/api/health` marks `ingest_recent` as `warn`. |
 | `INGEST_SILENCE_CRIT_SEC` | `3600` | Same, for `critical`. Do not widen these to silence flapping — that is what `ALERT_CONFIRM_TICKS` is for. |
 | `ALERT_CONFIRM_TICKS` | `2` | Consecutive `health:alert` polls a check must report the same non-ok level before it pages. Recovery to `ok` is always reported immediately. |
+| `HOT_LEAD_BOT_TOKEN` | (falls back to `CONTACT_BOT_TOKEN`) | Bot for the **lead** channel used by `npm run hot-lead:alert`. |
+| `HOT_LEAD_CHAT_ID` | (empty → job errors) | Destination chat for hot leads. Deliberately never falls back to `TELEGRAM_ALERT_CHAT_ID` — leads and infrastructure alerts stay on separate channels. |
+| `CRM_SYNC_LOOKBACK_HOURS` | `48` | How far back `npm run crm:sync` considers sessions. Without a bound, enabling an integration replays the whole history into the customer's CRM. |
+| `CRM_SYNC_MAX_ATTEMPTS` | `3` | Failed dispatches are retried up to this many times. A failure must not retire a lead, and a broken endpoint must not retry forever. |
+| `CRM_LEAD_VALUE_RUB` | (empty → no amount sent) | Flat deal value written to Bitrix24 `OPPORTUNITY`. Unset means no amount, rather than one invented from the intent score. |
+| `GA4_LEAD_VALUE_RUB` | (empty → no `value` sent) | Flat per-lead `value` for GA4. Unset means GA4 receives no monetary value — a model probability is not revenue, and value-based bidding would optimise against it. |
+| `GA4_LOOKBACK_HOURS` | `72` (hard max) | Selection window for `npm run ga4:sync`. GA4 rejects events stamped older than 72 h, and events are stamped with the session's own time. |
+| `AUDIENCES_NEGATIVE_LOOKBACK_DAYS` | `90` | Window for the `negative_waste` Yandex Audiences segment. Negative targeting is a lasting exclusion, so it is not applied over all history. |
+| `TRAFFIC_AUDIT_MIN_SCORED_RATIO` | `0.5` | Share of a cohort that must carry a model score before intent influences the waste verdict. Below it the cohort reports `insufficient_data` instead of being recommended for shutdown. |
+| `B2B_ENRICH_RETRY_HOURS` | `168` | Backoff before re-querying DaData for an org it could not resolve. |

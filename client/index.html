@@ -529,16 +529,17 @@
   <!-- ================================================================== -->
   <!-- Script -->
   <!-- ================================================================== -->
-  <script type="module">
-    import { SurfaiTracker } from "./dist/tracker.js";
-    import {
-      ClickCollector,
-      FormCollector,
-      EngagementCollector,
-      SessionCollector,
-      ContextCollector,
-      CrossSessionCollector,
-    } from "./dist/collectors/index.js";
+  <!--
+    Load the SDK exactly the way the production install snippet does: a plain
+    script tag exposing the global. `npm run build` runs tsc and then esbuild
+    over the same dist/tracker.js path, so esbuild's IIFE bundle overwrites
+    tsc's ES module — an `import { SurfaiTracker } from "./dist/tracker.js"`
+    here has been throwing "does not provide an export named" since the first
+    commit. Loading the real artifact also makes this page test what clients
+    actually receive.
+  -->
+  <script src="./dist/tracker.js"></script>
+  <script>
 
     // --- Event Log (fetch interceptor) ------------------------------------
     const logEl = document.getElementById("log");
@@ -579,12 +580,8 @@
       }
     });
 
-    tracker.addCollector(new ClickCollector(tracker));
-    tracker.addCollector(new FormCollector(tracker));
-    tracker.addCollector(new EngagementCollector(tracker));
-    tracker.addCollector(new SessionCollector(tracker));
-    tracker.addCollector(new ContextCollector(tracker));
-    tracker.addCollector(new CrossSessionCollector(tracker));
+    // No addCollector calls: the bundle entry (src/bundle.ts) already registers
+    // every collector on SurfaiTrackerBundle, which is what the global is.
 
     tracker.start();
     window.addEventListener("beforeunload", () => tracker.stop());

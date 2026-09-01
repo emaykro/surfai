@@ -20,6 +20,33 @@ alwaysApply: false
 - Any contract change in the SDK must be mirrored in the backend validation schema in the same change.
 - `siteKey` is required by the server in production. SDK must always include `siteKey` in every batch if configured.
 
+## Session Lifetime
+
+`sessionId` is not permanent. `getSessionId()` in `src/helpers.ts` rotates it
+after 30 minutes without activity (`SESSION_INACTIVITY_MS`) or 24 hours of
+lifetime (`SESSION_MAX_MS`), matching Metrica/GA4.
+
+`sessionStorage` survives browser tab restore, so before this a tab the user
+never closed kept one id for months — prod held a 148-day session whose clicks,
+scroll and engagement were sums over that whole span, and we systematically
+undercounted sessions against Metrica.
+
+Rules when touching this code:
+
+- Activity is stamped by `touchSession()` from `resetIdle()`, throttled to one
+  write per 30 s. Never call `sessionStorage.setItem` directly on the activity
+  path — it is synchronous and `resetIdle` fires on every throttled mousemove.
+- Wrap every storage access: `sessionStorage` throws in some privacy modes, and
+  the SDK must never throw into the host page.
+- Treat a negative age (clock moved backwards) as "just now" — it must neither
+  resurrect an expired session nor expire a live one.
+- An id from an older bundle has no timestamps: adopt it and start the clock,
+  do not discard a visit already in flight.
+
+Server side, `sanitizeDuration()` in `server/features/extractors.js` nulls any
+`session_duration_ms` below zero or above 26 h. See
+`vault/decisions/2026-09-01 session expiry — 30-minute inactivity and 24-hour cap.md`.
+
 ## Goal & Conversion API (Phase 5)
 
 - `surfai.goal(goalId, metadata?)` — fires a `goal` event. Deduplicated: same goalId within 5s window is silently dropped.

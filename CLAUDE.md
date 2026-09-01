@@ -188,7 +188,7 @@ Operator Cabinet: `http://localhost:3000/cabinet/`
 
 ### Rules
 
-- `sessionId` — non-empty string, one per browser tab via `sessionStorage`.
+- `sessionId` — non-empty string, held in `sessionStorage` and **expired by the SDK** after 30 min of inactivity or 24 h of lifetime, matching Metrica/GA4. Without expiry a restored tab kept one id for months (prod held a 148-day session); see `vault/decisions/2026-09-01 session expiry — 30-minute inactivity and 24-hour cap.md`. The server additionally nulls any `session_duration_ms` beyond 26 h or below zero.
 - `sentAt` — integer unix ms, stamped by SDK at send time.
 - `events` — non-empty array.
 - All numeric fields must be numbers, never strings.

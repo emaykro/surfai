@@ -23,14 +23,115 @@ export function now(): number {
   return Date.now();
 }
 
-export function getSessionId(): string {
-  const key = "surfai_session_id";
-  let id = sessionStorage.getItem(key);
-  if (!id) {
-    id = crypto.randomUUID();
-    sessionStorage.setItem(key, id);
+/**
+ * Session lifetime bounds, matching Yandex Metrica / GA4 conventions.
+ *
+ * sessionStorage survives browser tab restore, so without an expiry a tab the
+ * user never closes keeps one sessionId for months: prod held sessions of 148
+ * days, whose per-session features were sums over that whole span. It also
+ * made us undercount sessions against Metrica, which does split on inactivity.
+ */
+export const SESSION_INACTIVITY_MS = 30 * 60 * 1000; // 30 minutes
+export const SESSION_MAX_MS = 24 * 60 * 60 * 1000; // hard cap
+
+const SESSION_ID_KEY = "surfai_session_id";
+const SESSION_STARTED_KEY = "surfai_session_started";
+const SESSION_LAST_SEEN_KEY = "surfai_session_last_seen";
+
+/**
+ * sessionStorage throws outright in some privacy modes rather than returning
+ * null, and the SDK must never throw into the host page. Every access goes
+ * through these two helpers.
+ */
+function storageGet(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
   }
+}
+
+function storageSet(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable — fall through with an in-memory id for this page */
+  }
+}
+
+function parseTs(raw: string | null): number | null {
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Fallback id when sessionStorage cannot be read or written at all. */
+let volatileId: string | null = null;
+
+function newSessionId(ts: number): string {
+  const id =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : "sid-" + ts.toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+  storageSet(SESSION_ID_KEY, id);
+  storageSet(SESSION_STARTED_KEY, String(ts));
+  storageSet(SESSION_LAST_SEEN_KEY, String(ts));
+  volatileId = id;
+  lastTouchWrite = ts;
   return id;
+}
+
+/**
+ * Current session id, rotating when the session has expired.
+ *
+ * A session ends after SESSION_INACTIVITY_MS without activity, or once it has
+ * been alive for SESSION_MAX_MS, whichever comes first.
+ */
+export function getSessionId(): string {
+  const ts = now();
+  const id = storageGet(SESSION_ID_KEY) ?? volatileId;
+  if (!id) return newSessionId(ts);
+
+  const startedAt = parseTs(storageGet(SESSION_STARTED_KEY));
+  const lastSeenAt = parseTs(storageGet(SESSION_LAST_SEEN_KEY));
+
+  // An id written by an older SDK build has no timestamps. Adopt it and start
+  // the clock now rather than discarding a session already in flight.
+  if (startedAt === null || lastSeenAt === null) {
+    storageSet(SESSION_STARTED_KEY, String(ts));
+    storageSet(SESSION_LAST_SEEN_KEY, String(ts));
+    volatileId = id;
+    return id;
+  }
+
+  // A clock moved backwards must not resurrect an expired session, nor expire
+  // a live one: treat any negative age as "just now".
+  const idleMs = Math.max(0, ts - lastSeenAt);
+  const ageMs = Math.max(0, ts - startedAt);
+
+  if (idleMs >= SESSION_INACTIVITY_MS || ageMs >= SESSION_MAX_MS) {
+    return newSessionId(ts);
+  }
+
+  volatileId = id;
+  return id;
+}
+
+/**
+ * Stamp activity so the inactivity window is measured from the last event.
+ *
+ * Throttled: this is called from the activity path (every throttled mousemove
+ * and scroll), and sessionStorage writes are synchronous. Writing at most once
+ * per 30 s costs nothing against a 30-minute window.
+ */
+const TOUCH_THROTTLE_MS = 30 * 1000;
+let lastTouchWrite = 0;
+
+export function touchSession(): void {
+  const ts = now();
+  if (ts - lastTouchWrite < TOUCH_THROTTLE_MS) return;
+  lastTouchWrite = ts;
+  storageSet(SESSION_LAST_SEEN_KEY, String(ts));
 }
 
 /** Build a simple CSS selector for an element (no text content). */

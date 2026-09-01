@@ -9,7 +9,7 @@
  */
 
 import type { TrackingEvent, TrackerOptions, Collector, PageGoalRule, DataLayerMapping, WidgetConfig } from "./types.js";
-import { isInputElement, scrollPercent, now, getSessionId } from "./helpers.js";
+import { isInputElement, scrollPercent, now, getSessionId, touchSession } from "./helpers.js";
 import { SmartWidgetEngine } from "./widget.js";
 
 // Re-export public types and classes
@@ -299,6 +299,9 @@ export class SurfaiTracker {
   private resetIdle = (): void => {
     this.lastActivity = now();
     this.idleReported = false;
+    // Single funnel for real interaction — stamp the session here so the
+    // 30-minute inactivity window tracks activity, not page-load time.
+    touchSession();
   };
 
   private checkIdle = (): void => {

@@ -371,17 +371,36 @@ function extractEngagement(events) {
 // Session-level signals
 // ---------------------------------------------------------------------------
 
+// Defensive bound on session duration.
+//
+// The SDK rotates sessionId after 30 min of inactivity or 24 h of lifetime
+// (see vault/decisions/2026-09-01 session expiry). Anything beyond that plus
+// slack predates the fix or comes from an older cached bundle — prod held
+// sessions of 148 days, whose per-session features were sums over months.
+//
+// Out-of-range values become null rather than being clamped: null is the
+// honest "we do not know", CatBoost handles it natively and SQL AVG skips it,
+// whereas a clamp would pile a fake spike at the ceiling.
+const SESSION_MAX_PLAUSIBLE_MS = 26 * 60 * 60 * 1000;
+
+function sanitizeDuration(ms) {
+  if (!Number.isFinite(ms)) return null;
+  if (ms < 0 || ms > SESSION_MAX_PLAUSIBLE_MS) return null;
+  return ms;
+}
+
 function extractSession(events, allEvents) {
   if (!events.length) return {};
 
   const latest = events[events.length - 1].data;
 
-  // Session duration from all events
+  // Session duration from all events. Events arrive ORDER BY ts ASC, so these
+  // are the min and max client timestamps.
   let durationMs = null;
   if (allEvents.length >= 2) {
     const firstTs = allEvents[0].data.ts;
     const lastTs = allEvents[allEvents.length - 1].data.ts;
-    durationMs = lastTs - firstTs;
+    durationMs = sanitizeDuration(lastTs - firstTs);
   }
 
   return {
@@ -569,6 +588,8 @@ function extractAllFeatures(events) {
 }
 
 module.exports = {
+  sanitizeDuration,
+  SESSION_MAX_PLAUSIBLE_MS,
   extractAllFeatures,
   extractMouse,
   extractScroll,

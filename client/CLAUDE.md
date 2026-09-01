@@ -44,6 +44,7 @@ This package must have zero runtime dependencies. Only `typescript` is allowed a
 - `isInputElement()` gate is mandatory: skip any event where the target is `INPUT`, `TEXTAREA`, or `contenteditable`.
 - Never capture text content, innerHTML, field values, clipboard data, or any string that could contain PII.
 - `sessionId` comes from `sessionStorage` only — never read cookies, localStorage auth tokens, or fingerprint data.
+- **Sessions expire.** `getSessionId()` mints a new id after `SESSION_INACTIVITY_MS` (30 min) without activity or `SESSION_MAX_MS` (24 h) of lifetime. `sessionStorage` survives tab restore, so without this a single id lived for months and every per-session feature became a months-long sum. `touchSession()` stamps activity from `resetIdle()` and is throttled to one write per 30 s — do not call `sessionStorage.setItem` on the raw activity path. All storage access is wrapped in try/catch: it throws outright in some privacy modes.
 
 ## Data Contract
 
